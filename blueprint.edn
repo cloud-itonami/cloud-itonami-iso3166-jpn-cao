@@ -1,0 +1,12 @@
+{:itonami.blueprint/id "cloud-itonami-iso3166-jpn-cao"
+ :itonami.blueprint/name "Independent Cabinet-Office Cross-Ministerial Program Compliance Service — Japan (CAO)"
+ :itonami.blueprint/iso3166 "JPN-CAO"
+ :itonami.blueprint/iso3166-parent "JPN"
+ :itonami.blueprint/ooyake-id "gov.jpn.cao"
+ :itonami.blueprint/domain :public-sector/cao-cross-ministerial-compliance
+ :itonami.blueprint/license "AGPL-3.0-or-later"
+ :itonami.blueprint/social-impact [:regulatory-reform-clarity :cross-ministerial-program-access :public-spend-transparency]
+ :itonami.blueprint/governor :cross-ministerial-compliance-governor
+ :itonami.blueprint/robotics false
+ :itonami.blueprint/required-technologies [:identity :forms :dmn :bpmn :audit-ledger]
+ :itonami.blueprint/status :public-oss}
