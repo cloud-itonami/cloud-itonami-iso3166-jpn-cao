@@ -1,0 +1,13 @@
+;; Real-world organization location / contact.
+;; :head-role is institutional title only — no personal names.
+{:ooyake-id "gov.jpn.cao"
+  :official-url "https://www.cao.go.jp/"
+  :name-en "Cabinet Office"
+  :name-local "内閣府"
+  :wikidata "Q6005"
+  :head-role "内閣総理大臣（主任の大臣）/ 内閣府特命担当大臣"
+  :head-role-note "institutional office title only; personal names of current office-holders are intentionally NOT stored"
+  :contact-page "https://www.cao.go.jp/"
+  :sourced-from "com-etzhayyim-ooyake gov-units (verbatim where present)"
+  :hq {:postal-code "100-8914" :line-local "東京都千代田区永田町1-6-1" :line-en "1-6-1 Nagatacho, Chiyoda-ku, Tokyo" :country "jpn" :phone "03-5253-2111" :hours "平日 9:30-18:15" :kind "headquarters" :provenance "https://www.cao.go.jp/" :last-verified "2026-06-02" :sourcing "representative"}
+}
