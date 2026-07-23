@@ -9,4 +9,5 @@
  :itonami.blueprint/governor :cross-ministerial-compliance-governor
  :itonami.blueprint/robotics false
  :itonami.blueprint/required-technologies [:identity :forms :dmn :bpmn :audit-ledger]
- :itonami.blueprint/status :public-oss}
+ :itonami.blueprint/status :public-oss
+ :itonami.blueprint/organization {:ooyake-id "gov.jpn.cao" :official-url "https://www.cao.go.jp/" :head-role "内閣総理大臣（主任の大臣）/ 内閣府特命担当大臣" :hq-line-local "東京都千代田区永田町1-6-1" :hq-phone "03-5253-2111" :contact-page "https://www.cao.go.jp/"}}
