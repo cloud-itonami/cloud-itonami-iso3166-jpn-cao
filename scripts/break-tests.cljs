@@ -1,0 +1,227 @@
+;; Break the register on purpose and check that verify-facts.cljs goes red --
+;; and red for the RIGHT REASON, and with the right exit code.
+;;
+;;   nbb --classpath scripts scripts/break-tests.cljs
+;;
+;; -- WHAT THIS ADDS OVER THE SELF-TESTS
+;;
+;; verify-facts.cljs already runs sixteen self-tests that drive its judges
+;; over live responses with one expectation doctored. Those prove the judges
+;; discriminate. They cannot prove anything about the SCRIPT: that a failing
+;; entry actually reaches the exit code, that a refusal outranks a failure,
+;; that the aggregation does not quietly drop a verdict on the floor.
+;;
+;; A judge that returns :page/needle-absent and a run that exits 0 anyway is a
+;; perfectly plausible bug, and every self-test would still pass. So this file
+;; writes doctored copies of facts.edn, runs the real script against each as a
+;; SUBPROCESS, and asserts the process exit code and the reason keyword that
+;; appears in its output.
+;;
+;; -- THE CONTROL MATTERS AS MUCH AS THE MUTATIONS
+;;
+;; The first case below changes nothing and requires exit 0. Without it, every
+;; other case here is satisfied by a script that always fails -- which is the
+;; failure mode this whole file exists to rule out, and the one a break-test
+;; suite is most likely to have.
+;;
+;; -- EXIT CODES ARE ASSERTED SEPARATELY FROM REASONS
+;;
+;; Three mutations below must produce exit 2 (REFUSED), not exit 1. A register
+;; whose needle has drifted into site chrome is not a finding about the world;
+;; collapsing that into a failure is exactly the confusion the three-code
+;; scheme exists to prevent, and only an end-to-end check can see it.
+;;
+;; -- THE MUTATION MUST BREAK THE THING THE CASE NAMES
+;;
+;; Every anchor below is asserted present before substitution, so a mutation
+;; whose anchor has drifted throws instead of testing an unmutated file. That
+;; is not enough on its own: a break test can also go red for a reason other
+;; than the one it names, and count that as success. Hence expect-in-output --
+;; the case passes only when the exit code AND the reason keyword both match.
+;;
+;; This is slow -- each case is a full live run of about forty fetches. That
+;; is the cost of testing the script rather than a stub of it.
+
+(ns break-tests
+  (:require ["fs" :as fs]
+            ["child_process" :as cp]
+            [clojure.string :as str]))
+
+(def ^:private facts (fs/readFileSync "facts.edn" "utf8"))
+
+(defn- mutate
+  "Textual substitution on the register. Deliberately NOT a structural edit:
+   the point is to produce a file a person could plausibly have written, and
+   to fail loudly if the anchor is not found rather than silently testing an
+   unmutated file -- a break test that forgot to break anything reports the
+   same green as one that worked."
+  [from to]
+  (when-not (str/includes? facts from)
+    (throw (js/Error. (str "anchor not found in facts.edn: " (pr-str from)
+                           " -- this mutation would have tested nothing"))))
+  (str/replace facts from to))
+
+(def ^:private cases
+  [{:name "unmodified register"
+    :why "the control. Without it every case below passes for a script that always fails."
+    :facts facts
+    :exit 0
+    :expect-in-output "OK -- all"}
+
+   {:name "a law title that no longer matches the authority"
+    :why "an ordinary finding about the world: exit 1."
+    :facts (mutate ":law/title \"国家戦略特別区域法\"" ":law/title \"国家戦略特別区域法（旧）\"")
+    :exit 1
+    :expect-in-output ":law/title-mismatch"}
+
+   {:name "a repeal the register has not caught up with"
+    :why "the authority says Repeal and the register says None -- what a live
+          statute looks like the day after it is repealed. Anchored on the
+          sandbox control's own promulgation date because :law/repeal-status
+          \"Repeal\" appears twice in the file and an ambiguous anchor would
+          mutate both.
+
+          The first version of this case swapped a LAW ID instead, pointing the
+          live sandbox statute at the repealed Act that replaced it. It went
+          red -- and red for :law/title-mismatch, because judge-statute checks
+          identity before status and the two Acts have different titles. Exit 1
+          was right and the demonstration was worthless: it proved the title
+          check works, while claiming to prove the repeal check does."
+    :facts (mutate ":law/promulgated \"2018-05-23\"\n  :law/repeal-status \"Repeal\""
+                   ":law/promulgated \"2018-05-23\"\n  :law/repeal-status \"None\"")
+    :exit 1
+    :expect-in-output ":law/repeal-mismatch"}
+
+   {:name "a statute that is not repealed but whose revision is superseded"
+    :why "repeal_status stays None on both sides here and MATCHES, so a check
+          reading only that field passes. Only current_revision_status sees it.
+          Same lesson as above: mutating the id would have tripped the title
+          check first and proved nothing about the revision field."
+    :facts (mutate ":law/revision-status \"PreviousEnforced\""
+                   ":law/revision-status \"CurrentEnforced\"")
+    :exit 1
+    :expect-in-output ":law/revision-mismatch"}
+
+   {:name "a page needle that is on its own host's 404 body"
+    :why "a broken check, not a changed page: exit 2, REFUSED. 内閣府 is on the
+          www/www8 404 five times. If this ever reported exit 1 it would be
+          indistinguishable from a real finding."
+    :facts (mutate ":page/needle \"規制改革関係府省庁連絡会議\"" ":page/needle \"内閣府\"")
+    :exit 2
+    :expect-in-output ":refused/needle-on-404"}
+
+   {:name "a chisou page needle that is on the CHISOU 404 body but not the CAO one"
+    :why "the reason needles are subtracted per host rather than against one
+          probe. 地方創生 is chrome on chisou and absent from the CAO 404 -- a
+          verifier that used a single probe would clear this needle."
+    :facts (mutate ":page/needle \"構造改革特区\"" ":page/needle \"地方創生\"")
+    :exit 2
+    :expect-in-output ":refused/needle-on-404"}
+
+   {:name "a document that has been deleted"
+    :why "on this host a deleted .xlsx answers 404 with HTML, so this only goes
+          red if the status and magic-byte checks are actually reached."
+    :facts (mutate "https://www.chisou.go.jp/tiiki/kokusentoc/zuijiteianyoshiki.xlsx"
+                   "https://www.chisou.go.jp/tiiki/kokusentoc/zuijiteianyoshiki-gone.xlsx")
+    :exit 1
+    :expect-in-output ":form/bad-status"}
+
+   {:name "a document the citing page no longer links"
+    :why "the file is alive and every check on the file alone passes. Only the
+          link half sees it, and only because both sides are resolved to
+          absolute URLs -- these pages link relatively."
+    :facts (mutate ":form/linked-from \"https://www.chisou.go.jp/tiiki/kokusentoc/teian.html\"\n  :form/basis [\"国家戦略特別区域法\"]\n  :source/verify :verify/form\n  :source/covers\n  \"The actual proposal form"
+                   ":form/linked-from \"https://www.chisou.go.jp/tiiki/toc/document.html\"\n  :form/basis [\"国家戦略特別区域法\"]\n  :source/verify :verify/form\n  :source/covers\n  \"The actual proposal form")
+    :exit 1
+    :expect-in-output ":form/orphaned-citation"}
+
+   {:name "a 404 probe that no longer 404s"
+    :why "every needle on that host is subtracted from that body. If it is not
+          a missing page, those page checks mean nothing and the run must
+          refuse rather than report them as passes."
+    :facts (mutate ":host/missing-probe \"https://www.chisou.go.jp/zzz-no-such-page-9f3c2a1b8e/\""
+                   ":host/missing-probe \"https://www.chisou.go.jp/index.html\"")
+    :exit 2
+    :expect-in-output ":refused/missing-probe-not-404"}
+
+   {:name "a host that stops redirecting its missing pages"
+    :why "chisou answers 302 before it answers 404. A client that stopped
+          following would see neither, so the claim is held live.
+
+          This case first reported exit 2 rather than 1, and the reason is
+          worth keeping: the host self-tests used to build their baseline from
+          the register's own chisou entry, so doctoring an EARLIER property of
+          that entry changed what a LATER self-test observed, and the run
+          refused with a complaint about the judges while the judges were
+          correct. Those two self-tests now use a synthetic entry."
+    :facts (mutate ":host/missing-redirects? true" ":host/missing-redirects? false")
+    :exit 1
+    :expect-in-output ":host/redirect-behaviour-changed"}
+
+   {:name "a host whose HEAD behaviour is misdescribed"
+    :why "www.cao.go.jp reports no Content-Length and www8.cao.go.jp reports an
+          accurate one, while serving a byte-identical 404. Claiming they are
+          alike must be a finding, or the two would collapse into one host."
+    :facts (mutate ":host/front-page \"https://www.cao.go.jp/index.html\"\n  :host/missing-redirects? false\n  :host/missing-longer-than-front? false\n  :host/head-reports-content-length? false"
+                   ":host/front-page \"https://www.cao.go.jp/index.html\"\n  :host/missing-redirects? false\n  :host/missing-longer-than-front? false\n  :host/head-reports-content-length? true")
+    :exit 1
+    :expect-in-output ":host/head-behaviour-changed"}
+
+   {:name "a repeal token left without a control"
+    :why "dropping a control does not fail any citation -- it silently shrinks
+          what the repeal check can see. Only the coverage check notices."
+    :facts (mutate ":host/repeal-tokens [\"Repeal\" \"Expire\" \"LossOfEffectiveness\"]"
+                   ":host/repeal-tokens [\"Repeal\" \"Expire\" \"LossOfEffectiveness\" \"Suspended\"]")
+    :exit 1
+    :expect-in-output ":host/token-uncontrolled"}
+
+   {:name "the corpus size the header's token counts were taken over"
+    :why "the token frequencies in facts.edn's header are a claim about a
+          specific corpus. If it changes they are stale, and nothing else here
+          would say so."
+    :facts (mutate ":host/corpus-size 9550" ":host/corpus-size 9549")
+    :exit 1
+    :expect-in-output ":host/corpus-size-changed"}])
+
+(defn- run-case [i {:keys [name why facts exit expect-in-output]}]
+  (let [path (str "/tmp/break-facts-cao-" i ".edn")]
+    (fs/writeFileSync path facts)
+    (let [r (cp/spawnSync "nbb" (clj->js ["--classpath" "scripts"
+                                          "scripts/verify-facts.cljs" path])
+                          #js {:encoding "utf8" :timeout 600000})
+          out (str (.-stdout r) (.-stderr r))
+          code (.-status r)
+          exit-ok? (= exit code)
+          reason-ok? (str/includes? out expect-in-output)]
+      (fs/unlinkSync path)
+      {:name name :why why
+       :want-exit exit :got-exit code
+       :want-reason expect-in-output
+       :reason-ok? reason-ok?
+       :ok? (and exit-ok? reason-ok?)
+       :tail (->> (str/split-lines out) (remove str/blank?) (take-last 3) (str/join " | "))})))
+
+(defn- main []
+  (println (str "Running " (count cases) " end-to-end cases against the live authorities."))
+  (println "Each is a full run of verify-facts.cljs as a subprocess; this takes a while.")
+  (println)
+  (let [results (doall (map-indexed run-case cases))]
+    (doseq [r results]
+      (println (str (if (:ok? r) "  ok    " "  BAD   ") (:name r)))
+      (println (str "          exit want " (:want-exit r) " got " (:got-exit r)
+                    (when-not (:reason-ok? r)
+                      (str "  |  expected " (:want-reason r) " in output, absent"))))
+      (when-not (:ok? r)
+        (println (str "          " (:tail r)))))
+    (println)
+    (let [bad (remove :ok? results)]
+      (if (seq bad)
+        (do (println (str "BAD -- " (count bad) " of " (count results)
+                          " cases did not behave as documented. verify-facts.cljs is not"
+                          " discriminating the way this repository claims it does, so its"
+                          " green runs do not mean what they say."))
+            (js/process.exit 1))
+        (println (str "OK -- all " (count results) " cases: the unmodified register passes,"
+                      " and each break goes red with its own reason and its own exit code."))))))
+
+(main)
