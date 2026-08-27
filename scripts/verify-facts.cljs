@@ -1,0 +1,837 @@
+;; Re-fetch every entry in facts.edn from the live authority.
+;;
+;;   nbb --classpath scripts scripts/verify-facts.cljs [facts.edn]
+;;
+;; -- THREE EXIT CODES, ON PURPOSE
+;;
+;;   0  every entry checked and every entry agreed with the register
+;;   1  the register is wrong about the world -- a page is gone, a law id no
+;;      longer resolves, a repeal happened, a form dangles. A claim, from a
+;;      run that was able to make claims.
+;;   2  REFUSED. This run could not answer. Not a pass.
+;;
+;; The third code is the point. On these hosts it is not academic: the
+;; www.cao.go.jp 404 page carries 内閣府 five times and the www.chisou.go.jp
+;; 404 carries 地方創生, so a needle that drifts into site chrome starts
+;; matching the missing page. That is a broken check, not a changed page.
+;; Reported as a failure it would be indistinguishable from a real finding;
+;; reported as a pass it would be worse. It REFUSES.
+;;
+;; -- WHY EACH CHECK IS THE CHECK IT IS
+;;
+;; Each non-obvious decision is forced by something measured against these
+;; hosts on 2026-08-27 and written out in facts.edn's header rather than
+;; repeated here. In short:
+;;
+;;   there are THREE page hosts, and a needle is subtracted from the 404 body
+;;   of the page's OWN host -- www.cao.go.jp and www8.cao.go.jp serve a
+;;   byte-identical 404 while www.chisou.go.jp serves a different one, and
+;;   subtracting the wrong probe would clear a needle that is chrome;
+;;
+;;   redirects are followed, because www.chisou.go.jp answers a missing page
+;;   with 302 to <path>/index.html and only that answers 404 -- an unfollowed
+;;   request sees neither a live page nor a missing one;
+;;
+;;   HEAD is asserted per host rather than used, because www8.cao.go.jp
+;;   reports an accurate Content-Length and www.cao.go.jp reports none at all,
+;;   for either a live page or a missing one;
+;;
+;;   statutes are identified by total_count and law_id, NEVER by HTTP status,
+;;   because the listing endpoint answers a fabricated law id with 200;
+;;
+;;   the repeal fields are read from revision_info, and their PRESENCE is
+;;   asserted separately from their value, because reading them from law_info
+;;   yields nil and the live not-repealed token is the string "None" -- a
+;;   register that never asked and an authority that said no look identical;
+;;
+;;   being in force is TWO fields, because repeal_status None does not mean
+;;   the served revision is the current one -- one entry in this register's
+;;   own subject matter, 構造改革特別区域法, is exactly that case;
+;;
+;;   page bodies are decoded with a fatal UTF-8 decoder, because these hosts
+;;   send a bare text/html and declare their encoding only in the document --
+;;   a mojibake needle failure is not a finding;
+;;
+;;   no check asserts a byte size, because the landing pages carry dated news
+;;   items and one real page is shorter than its own host's 404;
+;;
+;;   documents are checked on status, content-type AND magic bytes, because a
+;;   deleted one answers 404 with HTML, and on still being LINKED, because a
+;;   file nothing cites any more is an orphaned citation that no check on the
+;;   file alone can see.
+;;
+;; -- SELF-TESTS ASSERT THE REASON, NOT THE VERDICT
+;;
+;; A negative test that only asserts this-failed counts a failure for the
+;; wrong cause as a success. Every self-test below names the reason keyword it
+;; expects and the run REFUSES if it gets any other -- including :ok. The
+;; judges are pure and take already-fetched data, so the self-tests drive the
+;; SAME functions the run uses, mostly over real live responses with one
+;; expectation doctored.
+
+(ns verify-facts
+  (:require ["fs" :as fs]
+            [clojure.edn :as edn]
+            [clojure.string :as str]
+            [host-probe :refer [decode-utf8-strict fetch-bytes fetch-head fetch-json
+                                fetch-no-redirect page-title de-tag]]))
+
+;; -- refusal ---------------------------------------------------------------
+
+(def ^:private refuse-reasons
+  #{:refused/fetch-error
+    :refused/unparseable-json
+    :refused/undecodable-body
+    :refused/no-title
+    :refused/needle-on-404
+    :refused/missing-probe-not-404
+    :refused/no-probe-for-host
+    :refused/repeal-field-absent
+    :refused/revision-field-absent
+    :refused/self-test})
+
+(defn- refused? [reason] (contains? refuse-reasons reason))
+
+;; -- judges (pure) ---------------------------------------------------------
+
+(defn- judge-missing-page
+  "Each host's 404 probe. If one of these stops being a 404, every needle on
+   that host is being subtracted from something that is not a missing page,
+   and that host's whole page section is meaningless. It refuses; it does not
+   fail once per page."
+  [entry {:keys [status bytes error]}]
+  (cond
+    error {:reason :refused/fetch-error :detail error}
+    (not= status (:host/missing-status entry))
+    {:reason :refused/missing-probe-not-404
+     :detail (str (:host/name entry) " probe answered " status
+                  ", register says " (:host/missing-status entry))}
+    :else
+    (let [html (decode-utf8-strict bytes)]
+      (cond
+        (nil? html) {:reason :refused/undecodable-body
+                     :detail (str (:host/name entry) " probe body is not valid UTF-8")}
+        :else
+        (let [title (page-title html)]
+          (cond
+            (nil? title) {:reason :refused/no-title
+                          :detail (str (:host/name entry) " probe has no title element")}
+            (not= title (:host/missing-title entry))
+            {:reason :control/title-mismatch
+             :detail (str "probe title " (pr-str title) ", register says "
+                          (pr-str (:host/missing-title entry)))}
+            :else {:reason :ok
+                   :detail (str (:host/name entry) " 404 held, "
+                                (count (de-tag html)) " chars")}))))))
+
+(defn- judge-page
+  "status, exact title, needle present here AND absent from the live 404 body
+   OF THIS PAGE'S OWN HOST. The needle subtraction is redone every run because
+   a host's chrome is what makes a needle wrong, and chrome changes without
+   the page changing.
+
+   text-404 is passed in already resolved for the right host. Passing nil is
+   not a pass -- it refuses, because a needle that was never subtracted from
+   anything is a needle that was never checked."
+  [entry {:keys [status bytes error]} text-404]
+  (cond
+    error {:reason :refused/fetch-error :detail error}
+    (nil? text-404)
+    {:reason :refused/no-probe-for-host
+     :detail (str "no 404 body resolved for " (pr-str (:page/host entry))
+                  " -- the needle would not have been subtracted from anything")}
+    (not= 200 status) {:reason :page/bad-status :detail (str "HTTP " status)}
+    :else
+    (let [html (decode-utf8-strict bytes)]
+      (cond
+        (nil? html) {:reason :refused/undecodable-body :detail "body is not valid UTF-8"}
+        :else
+        (let [title (page-title html)
+              text (de-tag html)
+              needle (:page/needle entry)]
+          (cond
+            (nil? title) {:reason :refused/no-title :detail "no title element"}
+            ;; The 404 check comes BEFORE the presence check on purpose. A
+            ;; needle that has drifted into chrome is present on the page too,
+            ;; so testing presence first would report :ok and never look.
+            (str/includes? text-404 needle)
+            {:reason :refused/needle-on-404
+             :detail (str "needle " (pr-str needle)
+                          " is on the live 404 body of this page's host -- it can no"
+                          " longer tell this page from a deleted one; choose another"
+                          " by subtraction")}
+            (not= title (:page/title entry))
+            {:reason :page/title-mismatch
+             :detail (str "live " (pr-str title) ", register " (pr-str (:page/title entry)))}
+            (not (str/includes? text needle))
+            {:reason :page/needle-absent
+             :detail (str "needle " (pr-str needle) " not in " (count text) " chars of text")}
+            :else {:reason :ok :detail (str (count text) " chars, needle held")}))))))
+
+(def ^:private ctype-prefix
+  {:xlsx "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+   :pdf  "application/pdf"})
+
+(defn- hex-prefix
+  "The first n bytes as lower-case hex, so the register can state magic bytes
+   as a string rather than a vector the reader has to be trusted with."
+  [bytes n]
+  (->> (range (min n (.-length bytes)))
+       (map #(.padStart (.toString (aget bytes %) 16) 2 "0"))
+       (apply str)))
+
+(defn- judge-form
+  "Three independent properties plus still-being-linked. A deleted document on
+   the chisou host answers 404 with 2508 bytes of HTML, so a non-empty body
+   proves nothing and the magic bytes are the check that cannot be satisfied
+   by the 404 page.
+
+   Magic bytes are compared against the value the REGISTER records, not
+   against a table keyed on kind alone. .xlsx and .docx are both ZIP
+   containers with identical first four bytes, so a table keyed on kind would
+   silently accept the wrong Office format; recording the expected bytes per
+   entry keeps the two claims -- this is a ZIP, and this is the file we meant
+   -- from collapsing into one.
+
+   links is a SET of absolute URLs already resolved against the citing page,
+   not that page's HTML. Substring-matching the document's path into the HTML
+   is the obvious spelling and it is wrong on every host in this register:
+   these pages link their documents RELATIVE to themselves --
+   href=\"zuijiteianyoshiki.xlsx\", href=\"pdf/kokkasenryakutoc01.pdf\",
+   href=\"program/260721/01_program.pdf\" -- so the absolute path is never
+   present as a substring and all five entries reported an orphaned citation
+   on the first run. That failure was about the check, not the world.
+   Resolving both sides to absolute URLs asks the question the entry actually
+   means: does this page still point at this file, however it spells it."
+  [entry {:keys [status ctype bytes error]} links]
+  (let [kind (:form/kind entry)]
+    (cond
+      error {:reason :refused/fetch-error :detail error}
+      (not= 200 status) {:reason :form/bad-status :detail (str "HTTP " status)}
+      (not (str/starts-with? ctype (ctype-prefix kind)))
+      {:reason :form/ctype-mismatch
+       :detail (str "content-type " (pr-str ctype) ", expected " (pr-str (ctype-prefix kind)))}
+      (not= (:form/magic entry) (hex-prefix bytes 4))
+      {:reason :form/magic-mismatch
+       :detail (str "leading bytes " (hex-prefix bytes 4) ", register says "
+                    (:form/magic entry)
+                    " -- a 404 HTML body reaches this line with a plausible size")}
+      (nil? links)
+      {:reason :refused/fetch-error
+       :detail (str "could not read " (:form/linked-from entry)
+                    " -- the link half of this check did not run")}
+      (not (contains? links (:form/url entry)))
+      {:reason :form/orphaned-citation
+       :detail (str (:form/linked-from entry) " no longer links " (:form/url entry)
+                    " (" (count links) " links resolved on that page)"
+                    " -- the file is alive but nothing cites it")}
+      :else
+      {:reason :ok :detail (str (.-length bytes) " bytes, magic and link held")})))
+
+(defn- judge-missing-doc
+  "The chisou host's answer to a fabricated document path, held live. It is
+   the reason judge-form reads magic bytes at all: if a deleted .xlsx ever
+   started answering with something other than HTML, the argument for that
+   check would have changed and the register's header would be stale."
+  [entry {:keys [status ctype bytes error]}]
+  (cond
+    error {:reason :refused/fetch-error :detail error}
+    (not= (:host/missing-status entry) status)
+    {:reason :control/status-mismatch
+     :detail (str "missing document answered " status)}
+    (not (str/starts-with? ctype "text/html"))
+    {:reason :control/ctype-mismatch
+     :detail (str "missing document now answers " (pr-str ctype)
+                  " -- it used to answer HTML, which is why forms check magic bytes")}
+    (not= (:host/missing-doc-magic entry) (hex-prefix bytes 4))
+    {:reason :control/magic-mismatch
+     :detail (str "missing-document body now begins " (hex-prefix bytes 4)
+                  ", register says " (:host/missing-doc-magic entry))}
+    :else {:reason :ok :detail (str "deleted document still answers " ctype)}))
+
+(defn- law-row
+  "The single result, or nil. Never looks at the HTTP status."
+  [json]
+  (when (map? json)
+    (first (get json "laws"))))
+
+(defn- judge-statute
+  "Identity by total_count and law_id; in-force by two independent fields
+   whose PRESENCE is asserted before their value.
+
+   Works for live statutes and for controls alike -- the judge compares
+   against whatever the register records for that entry, so a control that
+   records Repeal is held to Repeal. That is what lets the self-tests feed it
+   a real repealed law with a doctored expectation and get a precise reason."
+  [entry {:keys [json bad-json error]}]
+  (cond
+    error {:reason :refused/fetch-error :detail error}
+    bad-json {:reason :refused/unparseable-json :detail "response was not JSON"}
+    :else
+    (let [tc (get json "total_count")
+          row (law-row json)]
+      (cond
+        (not= 1 tc)
+        {:reason :law/not-found
+         :detail (str "total_count " tc " for law_id " (:law/id entry)
+                      " -- note this response was HTTP 200")}
+        (nil? row) {:reason :refused/unparseable-json :detail "total_count 1 but no row"}
+        :else
+        (let [info (get row "law_info")
+              rev (get row "revision_info")]
+          (cond
+            (not (map? rev))
+            {:reason :refused/revision-field-absent :detail "no revision_info object"}
+
+            ;; Presence before value. nil and "None" mean opposite things.
+            (not (contains? rev "repeal_status"))
+            {:reason :refused/repeal-field-absent
+             :detail "revision_info has no repeal_status -- cannot conclude not-repealed from a field that is not there"}
+
+            (not (contains? rev "current_revision_status"))
+            {:reason :refused/revision-field-absent
+             :detail "revision_info has no current_revision_status"}
+
+            ;; If the authority ever moves these into law_info, the register's
+            ;; header is stale. Say so rather than quietly reading whichever
+            ;; one happens to answer.
+            (contains? info "repeal_status")
+            {:reason :law/repeal-field-moved
+             :detail "law_info now carries repeal_status too -- facts.edn's :host/repeal-fields-in is stale"}
+
+            (not= (:law/id entry) (get info "law_id"))
+            {:reason :law/id-mismatch
+             :detail (str "asked " (:law/id entry) ", got " (get info "law_id"))}
+
+            (not= (:law/title entry) (get rev "law_title"))
+            {:reason :law/title-mismatch
+             :detail (str "live " (pr-str (get rev "law_title"))
+                          ", register " (pr-str (:law/title entry)))}
+
+            (not= (:law/num entry) (get info "law_num"))
+            {:reason :law/num-mismatch
+             :detail (str "live " (pr-str (get info "law_num")))}
+
+            (not= (:law/type entry) (get info "law_type"))
+            {:reason :law/type-mismatch
+             :detail (str "live " (pr-str (get info "law_type")))}
+
+            (not= (:law/promulgated entry) (get info "promulgation_date"))
+            {:reason :law/promulgation-mismatch
+             :detail (str "live " (pr-str (get info "promulgation_date")))}
+
+            (not= (:law/repeal-status entry) (get rev "repeal_status"))
+            {:reason :law/repeal-mismatch
+             :detail (str "live repeal_status " (pr-str (get rev "repeal_status"))
+                          ", register " (pr-str (:law/repeal-status entry)))}
+
+            (not= (:law/revision-status entry) (get rev "current_revision_status"))
+            {:reason :law/revision-mismatch
+             :detail (str "live current_revision_status "
+                          (pr-str (get rev "current_revision_status"))
+                          ", register " (pr-str (:law/revision-status entry))
+                          " -- this field is independent of repeal_status")}
+
+            (and (contains? entry :law/repeal-date)
+                 (not= (:law/repeal-date entry) (get rev "repeal_date")))
+            {:reason :law/repeal-date-mismatch
+             :detail (str "live " (pr-str (get rev "repeal_date")))}
+
+            (and (contains? entry :law/remain-in-force)
+                 (not= (:law/remain-in-force entry) (get rev "remain_in_force")))
+            {:reason :law/remain-in-force-mismatch
+             :detail (str "live remain_in_force " (pr-str (get rev "remain_in_force")))}
+
+            :else
+            {:reason :ok
+             :detail (str (get rev "law_title") " " (get rev "repeal_status")
+                          "/" (get rev "current_revision_status"))}))))))
+
+(defn- judge-fabricated-id
+  "The trap that justifies never reading this endpoint's status. If it ever
+   starts 404ing, the register's header is stale and this fails loudly rather
+   than becoming silently over-cautious."
+  [entry {:keys [status json bad-json error]}]
+  (cond
+    error {:reason :refused/fetch-error :detail error}
+    bad-json {:reason :refused/unparseable-json :detail "response was not JSON"}
+    (not= (:control/expect-status entry) status)
+    {:reason :control/status-mismatch
+     :detail (str "fabricated law id answered " status ", register says "
+                  (:control/expect-status entry)
+                  " -- if this endpoint now discriminates by status, facts.edn's"
+                  " header is out of date")}
+    (not= (:control/expect-total-count entry) (get json "total_count"))
+    {:reason :control/total-count-mismatch
+     :detail (str "total_count " (get json "total_count")
+                  " for a fabricated id -- something now resolves it")}
+    :else {:reason :ok :detail "fabricated id still answers 200 with total_count 0"}))
+
+(defn- judge-page-host
+  "A page host's declared behaviour, re-measured. Without this the :host/*
+   entries would be prose: they would name a :source/verify tag that no check
+   implements, and read as verified because every OTHER entry passed.
+
+   Three properties, and each is here because the three hosts disagree about
+   it: whether a missing page redirects, whether HEAD reports a length, and
+   which of this repository's own words are in the chrome."
+  [entry {:keys [head-404 head-200 unfollowed text-404]}]
+  (cond
+    (:error head-404) {:reason :refused/fetch-error :detail (:error head-404)}
+    (:error head-200) {:reason :refused/fetch-error :detail (:error head-200)}
+    (:error unfollowed) {:reason :refused/fetch-error :detail (:error unfollowed)}
+
+    ;; Whether a missing page redirects decides whether a client that does not
+    ;; follow can see anything at all. Asserted as the unfollowed status, not
+    ;; as a boolean derived from it.
+    (not= (if (:host/missing-redirects? entry)
+            (:host/missing-status-unfollowed entry)
+            (:host/missing-status entry))
+          (:status unfollowed))
+    {:reason :host/redirect-behaviour-changed
+     :detail (str "unfollowed request answered " (:status unfollowed)
+                  ", register says "
+                  (if (:host/missing-redirects? entry)
+                    (str "302 (redirects to " (:host/missing-final-url entry) ")")
+                    (str (:host/missing-status entry) " directly")))}
+
+    ;; HEAD is never used to decide liveness. It is asserted so that the
+    ;; register's reason for not using it stays true, and so the split between
+    ;; www.cao.go.jp and www8.cao.go.jp does not quietly close.
+    (not= (:host/head-reports-content-length? entry)
+          (and (some? (:content-length head-404))
+               (some? (:content-length head-200))))
+    {:reason :host/head-behaviour-changed
+     :detail (str "HEAD content-length now 404=" (pr-str (:content-length head-404))
+                  " 200=" (pr-str (:content-length head-200))
+                  ", register says reports-content-length? "
+                  (:host/head-reports-content-length? entry))}
+
+    ;; The chrome needles are the phrases this repository would most want to
+    ;; use and cannot. If one of them LEAVES the chrome that is good news, but
+    ;; it is still news: the register says it is there.
+    :else
+    (let [missing (remove #(str/includes? text-404 %) (:host/chrome-needles entry))]
+      (if (seq missing)
+        {:reason :host/chrome-changed
+         :detail (str (pr-str (vec missing)) " no longer on this host's 404 body"
+                      " -- they may now be usable as needles, and the register"
+                      " says otherwise")}
+        {:reason :ok
+         :detail (str "404 shape, HEAD behaviour and "
+                      (count (:host/chrome-needles entry)) " chrome needle(s) held")}))))
+
+(defn- judge-statute-host
+  "The corpus-wide claims. Counted over every row, because a claim about which
+   token means what is a claim about all of them."
+  [entry {:keys [json bad-json error]}]
+  (cond
+    error {:reason :refused/fetch-error :detail error}
+    bad-json {:reason :refused/unparseable-json :detail "response was not JSON"}
+    :else
+    (let [total (get json "total_count")]
+      (if (not= (:host/corpus-size entry) total)
+        {:reason :host/corpus-size-changed
+         :detail (str "corpus is now " total ", register says " (:host/corpus-size entry)
+                      " -- the token counts in facts.edn's header were taken over"
+                      " a different corpus and should be re-measured")}
+        {:reason :ok :detail (str "corpus still " total " laws")}))))
+
+(defn- judge-token-coverage
+  "Which repeal tokens actually have a control. Not a pass/fail on coverage --
+   it is a pass/fail on the register's OWN statement of coverage. Silence
+   about an uncontrolled token is the failure this replaces."
+  [entry controls]
+  (let [held (set (keep :law/repeal-status controls))
+        want (set (:host/repeal-tokens entry))
+        uncovered (remove held want)]
+    (if (seq uncovered)
+      {:reason :host/token-uncontrolled
+       :detail (str (pr-str (vec uncovered)) " has no control holding it live"
+                    " -- a repeal check that does not know that string would pass")}
+      {:reason :ok
+       :detail (str (count want) " repeal token(s) held live; revision token(s) declared"
+                    " uncontrolled: "
+                    (pr-str (vec (:host/uncontrolled-revision-tokens entry))))})))
+
+;; -- self-tests ------------------------------------------------------------
+;;
+;; Each names the reason keyword it expects. Getting :ok, or getting a
+;; different failure, is a REFUSAL: the judges are not behaving as documented,
+;; so the run's passes mean nothing.
+;;
+;; The page and form samples are whichever entry came back healthy this run,
+;; not a fixed one chosen by name. A self-test pinned to a named entry stops
+;; running the day that entry legitimately breaks -- and stops running
+;; silently, which is the failure mode this whole file is about. When nothing
+;; healthy is available the test is reported SKIPPED, never passed.
+
+(defn- self-tests
+  [{:keys [repealed-json prev-enforced-json live-json fabricated-json
+           page page-bytes text-404 form form-bytes links
+           missing-doc]}
+   entries]
+  (let [by-id (into {} (map (juxt :source/id identity) entries))
+        skip (fn [nm why] {:name nm :skipped? true :detail why})
+        t (fn [nm expected actual] {:name nm :expected expected :actual actual})]
+    ;; One entry may contribute a GROUP of tests, so the list is flattened one
+    ;; level before nils are dropped.
+    (remove
+     nil?
+     (mapcat #(if (vector? %) % [%])
+     [;; A repealed law held to the register's live expectation must be caught
+      ;; on repeal_status, not on anything incidental.
+      (if repealed-json
+        (t "repealed law fails a not-repealed expectation"
+           :law/repeal-mismatch
+           (:reason (judge-statute (assoc (by-id :law/repealed-sandbox-control)
+                                          :law/repeal-status "None"
+                                          :law/revision-status "CurrentEnforced")
+                                   repealed-json)))
+        (skip "repealed law fails a not-repealed expectation" "control response unavailable"))
+
+      ;; The one the two-field rule exists for: not repealed, wrong revision.
+      ;; If this ever comes back :ok, reading repeal_status alone became safe
+      ;; -- and it did not.
+      (if prev-enforced-json
+        (t "not-repealed-but-superseded is caught by the revision field alone"
+           :law/revision-mismatch
+           (:reason (judge-statute (assoc (by-id :law/previous-enforced-control)
+                                          :law/revision-status "CurrentEnforced")
+                                   prev-enforced-json)))
+        (skip "not-repealed-but-superseded is caught by the revision field alone"
+              "control response unavailable"))
+
+      ;; Reading the repeal fields from the wrong object yields nil, and nil is
+      ;; not "None". Asserted by removing them.
+      (if live-json
+        (t "absent repeal_status refuses rather than reading as not-repealed"
+           :refused/repeal-field-absent
+           (:reason (judge-statute
+                     (by-id :law/cabinet-office-establishment-act)
+                     (update-in live-json [:json "laws" 0 "revision_info"]
+                                dissoc "repeal_status"))))
+        (skip "absent repeal_status refuses rather than reading as not-repealed"
+              "live response unavailable"))
+
+      (if live-json
+        (t "absent current_revision_status refuses"
+           :refused/revision-field-absent
+           (:reason (judge-statute
+                     (by-id :law/cabinet-office-establishment-act)
+                     (update-in live-json [:json "laws" 0 "revision_info"]
+                                dissoc "current_revision_status"))))
+        (skip "absent current_revision_status refuses" "live response unavailable"))
+
+      ;; total_count 0 with HTTP 200 is the shape a fabricated id takes.
+      (if fabricated-json
+        (t "a fabricated law id is not-found, not a pass"
+           :law/not-found
+           (:reason (judge-statute (assoc (by-id :law/cabinet-office-establishment-act)
+                                          :law/id "999AC0000000999")
+                                   fabricated-json)))
+        (skip "a fabricated law id is not-found, not a pass" "control response unavailable"))
+
+      ;; A needle that is site chrome must REFUSE, not fail and not pass. This
+      ;; is fed a needle that is actually on the live 404 body.
+      (if (and page page-bytes text-404)
+        (t "a needle found on the live 404 refuses"
+           :refused/needle-on-404
+           (:reason (judge-page (assoc page :page/needle
+                                       (subs text-404 0 (min 8 (count text-404))))
+                                page-bytes text-404)))
+        (skip "a needle found on the live 404 refuses" "no healthy page to doctor"))
+
+      ;; And a needle that is simply gone is a finding about the page.
+      (if (and page page-bytes text-404)
+        (t "a needle absent from the page is a finding"
+           :page/needle-absent
+           (:reason (judge-page (assoc page :page/needle "この語はどのページにも存在しない")
+                                page-bytes text-404)))
+        (skip "a needle absent from the page is a finding" "no healthy page to doctor"))
+
+      ;; Passing no 404 body must not read as "nothing was on it".
+      (if (and page page-bytes)
+        (t "a page with no 404 probe refuses instead of passing"
+           :refused/no-probe-for-host
+           (:reason (judge-page page page-bytes nil)))
+        (skip "a page with no 404 probe refuses instead of passing" "no healthy page to doctor"))
+
+      (if (and page page-bytes text-404)
+        (t "a changed title is a finding"
+           :page/title-mismatch
+           (:reason (judge-page (assoc page :page/title "存在しないタイトル")
+                                page-bytes text-404)))
+        (skip "a changed title is a finding" "no healthy page to doctor"))
+
+      ;; The magic-byte check must reject on the bytes, not on the extension.
+      (if (and form form-bytes)
+        (t "wrong magic bytes are a finding even when status and ctype are right"
+           :form/magic-mismatch
+           (:reason (judge-form (assoc form :form/magic "deadbeef")
+                                form-bytes links)))
+        (skip "wrong magic bytes are a finding even when status and ctype are right"
+              "no healthy document to doctor"))
+
+      ;; A live file nothing links to is an orphaned citation.
+      (if (and form form-bytes)
+        (t "a live document nothing links to is an orphaned citation"
+           :form/orphaned-citation
+           (:reason (judge-form form form-bytes #{"https://example.invalid/other"})))
+        (skip "a live document nothing links to is an orphaned citation"
+              "no healthy document to doctor"))
+
+      ;; An unreadable citing page must not silently pass the link half.
+      (if (and form form-bytes)
+        (t "an unreadable citing page refuses rather than skipping the link check"
+           :refused/fetch-error
+           (:reason (judge-form form form-bytes nil)))
+        (skip "an unreadable citing page refuses rather than skipping the link check"
+              "no healthy document to doctor"))
+
+      ;; The host judge must notice its own claims changing.
+      ;;
+      ;; These two build their baseline from a SYNTHETIC entry rather than
+      ;; from the register, unlike every other self-test here. That is not
+      ;; inconsistency -- judge-page-host checks three properties in order, so
+      ;; a self-test that read the live entry would change its own answer
+      ;; whenever an EARLIER property was doctored. It happened: doctoring
+      ;; :host/missing-redirects? in the register made the chrome self-test
+      ;; report :host/redirect-behaviour-changed, and the run refused with a
+      ;; complaint about the judges when the judges were right and the test
+      ;; was coupled. A test whose subject is the judge must not depend on the
+      ;; register the judge is being run against.
+      (let [base {:host/name "synthetic"
+                  :host/missing-status 404
+                  :host/missing-redirects? false
+                  :host/head-reports-content-length? true
+                  :host/chrome-needles ["握"]}
+            obs {:head-404 {:content-length "1"} :head-200 {:content-length "1"}
+                 :unfollowed {:status 404}
+                 :text-404 "握"}]
+        [(t "a synthetic host that passes every property is :ok"
+            :ok
+            (:reason (judge-page-host base obs)))
+
+         (t "a host that stops redirecting is a finding"
+            :host/redirect-behaviour-changed
+            (:reason (judge-page-host (assoc base
+                                             :host/missing-redirects? true
+                                             :host/missing-status-unfollowed 302)
+                                      obs)))
+
+         (t "a host whose HEAD stops reporting a length is a finding"
+            :host/head-behaviour-changed
+            (:reason (judge-page-host base (assoc obs :head-404 {:content-length nil}))))
+
+         (t "a chrome needle leaving the 404 is a finding"
+            :host/chrome-changed
+            (:reason (judge-page-host (assoc base :host/chrome-needles ["この語は404本文に無い"])
+                                      obs)))])
+
+      ;; Token coverage must report an uncovered token rather than a count.
+      (t "an uncontrolled repeal token is reported, not counted over"
+         :host/token-uncontrolled
+         (:reason (judge-token-coverage
+                   (assoc (by-id :host/e-gov) :host/repeal-tokens ["Repeal" "NeverSeenToken"])
+                   (filter :law/repeal-status entries))))
+
+      ;; And the missing-document control must be a control.
+      (if missing-doc
+        (t "a missing document that stops answering HTML is a finding"
+           :control/magic-mismatch
+           (:reason (judge-missing-doc (assoc (by-id :host/chisou)
+                                              :host/missing-doc-magic "cafebabe")
+                                       missing-doc)))
+        (skip "a missing document that stops answering HTML is a finding"
+              "missing-document control response unavailable"))]))))
+
+;; -- run -------------------------------------------------------------------
+
+(defn- resolved-links
+  "Every href on a page, resolved against that page's own URL. nil when the
+   page could not be read -- callers must not read nil as an empty set, which
+   would turn an unreadable citing page into a report that it cites nothing."
+  [page-url html]
+  (when html
+    (into #{}
+          (keep (fn [href]
+                  (try (.-href (js/URL. href page-url))
+                       (catch :default _ nil)))
+                (map second (re-seq #"href=\"([^\"]+)\"" html))))))
+
+(def ^:private argv (vec (drop 2 (js->clj js/process.argv))))
+
+;; The register path, taken as the first argument that ENDS IN .edn rather
+;; than the first non-flag argument. nbb leaves its own --classpath and that
+;; flag's VALUE in process.argv, and the value is a bare word, so a
+;; first-non-flag rule silently reads the classpath directory as the register
+;; and dies on EISDIR. Measured, not guessed -- it happened on the first run.
+(def ^:private facts-path
+  (or (first (filter #(str/ends-with? % ".edn") argv)) "facts.edn"))
+
+(defn- by-tag [entries tag] (filterv #(= tag (:source/verify %)) entries))
+
+(defn- p-all [xs] (js/Promise.all (clj->js xs)))
+
+(defn- main []
+  (let [entries (edn/read-string (fs/readFileSync facts-path "utf8"))
+        by-id (into {} (map (juxt :source/id identity) entries))
+        page-hosts (by-tag entries :verify/page-host)
+        statutes (by-tag entries :verify/statute)
+        controls (concat (by-tag entries :verify/control-repealed)
+                         (by-tag entries :verify/control-previous-enforced))
+        fabricated (first (by-tag entries :verify/fabricated-id))
+        pages (by-tag entries :verify/page)
+        forms (by-tag entries :verify/form)
+        e-gov (by-id :host/e-gov)
+        chisou (by-id :host/chisou)
+        api (:host/api-base e-gov)]
+    (println (str "verify-facts :: " facts-path " :: " (count entries) " entries"))
+    (->
+     (p-all
+      [(p-all (map #(fetch-bytes (:host/missing-probe %)) page-hosts))
+       (p-all (map #(fetch-head (:host/missing-probe %)) page-hosts))
+       (p-all (map #(fetch-head (:host/front-page %)) page-hosts))
+       (p-all (map #(fetch-no-redirect (:host/missing-probe %)) page-hosts))
+       (p-all (map #(fetch-json (str api (:law/id %))) statutes))
+       (p-all (map #(fetch-json (str api (:law/id %))) controls))
+       (fetch-json (str api (:law/id fabricated)))
+       (p-all (map #(fetch-bytes (:page/url %)) pages))
+       (p-all (map #(fetch-bytes (:form/url %)) forms))
+       (p-all (map #(fetch-bytes (:form/linked-from %)) forms))
+       (fetch-bytes (:host/missing-doc-probe chisou))
+       (fetch-json (str (:host/listing-base e-gov) "?limit=1"))])
+     (.then
+      (fn [rs]
+        (let [[probe-rs head404-rs head200-rs unfoll-rs statute-rs control-rs
+               fab-r page-rs form-rs linking-rs missing-doc-r corpus-r]
+              (map #(js->clj % :keywordize-keys true) (js->clj rs))
+
+              ;; Probe verdicts FIRST. A host whose 404 is not a 404 makes
+              ;; every needle on it meaningless, so its pages are refused
+              ;; rather than judged against a body of unknown provenance.
+              probe-verdicts (mapv (fn [h r] (assoc (judge-missing-page h r)
+                                                    :id (keyword "probe" (name (:source/id h)))))
+                                   page-hosts probe-rs)
+              text-404-by-host
+              (into {} (map (fn [h r v]
+                              [(:source/id h)
+                               (when (= :ok (:reason v))
+                                 (some-> (:bytes r) decode-utf8-strict de-tag))])
+                            page-hosts probe-rs probe-verdicts))
+
+              host-observed-by-id
+              (into {} (map (fn [h h4 h2 uf]
+                              [(:source/id h)
+                               {:head-404 h4 :head-200 h2 :unfollowed uf
+                                :text-404 (or (get text-404-by-host (:source/id h)) "")}])
+                            page-hosts head404-rs head200-rs unfoll-rs))
+
+              linking-links (mapv (fn [e r]
+                                    (resolved-links
+                                     (:form/linked-from e)
+                                     (when (and (nil? (:error r)) (= 200 (:status r)))
+                                       (decode-utf8-strict (:bytes r)))))
+                                  forms linking-rs)
+
+              results
+              (concat
+               probe-verdicts
+               (map (fn [e r] (assoc (judge-statute e r) :id (:source/id e))) statutes statute-rs)
+               (map (fn [e r] (assoc (judge-statute e r) :id (:source/id e))) controls control-rs)
+               [(assoc (judge-fabricated-id fabricated fab-r) :id (:source/id fabricated))]
+               (map (fn [e r] (assoc (judge-page e r (get text-404-by-host (:page/host e)))
+                                     :id (:source/id e)))
+                    pages page-rs)
+               (map (fn [e r l] (assoc (judge-form e r l) :id (:source/id e)))
+                    forms form-rs linking-links)
+               [(assoc (judge-missing-doc chisou missing-doc-r) :id :control/missing-document)]
+               (map (fn [h] (assoc (judge-page-host h (get host-observed-by-id (:source/id h)))
+                                   :id (:source/id h)))
+                    page-hosts)
+               [(assoc (judge-statute-host e-gov corpus-r) :id :host/e-gov)]
+               [(assoc (judge-token-coverage e-gov controls) :id :host/e-gov-tokens)])
+
+              pick (fn [es rs id] (some (fn [[e r]] (when (= id (:source/id e)) r))
+                                        (map vector es rs)))
+              healthy-page (first (keep (fn [[e r]]
+                                          (let [t4 (get text-404-by-host (:page/host e))]
+                                            (when (= :ok (:reason (judge-page e r t4)))
+                                              {:entry e :resp r :text-404 t4})))
+                                        (map vector pages page-rs)))
+              healthy-form (first (keep (fn [[e r l]]
+                                          (when (= :ok (:reason (judge-form e r l)))
+                                            {:entry e :resp r :links l}))
+                                        (map vector forms form-rs linking-links)))
+              st (vec (self-tests
+                       {:repealed-json (pick controls control-rs :law/repealed-sandbox-control)
+                        :prev-enforced-json (pick controls control-rs :law/previous-enforced-control)
+                        :live-json (pick statutes statute-rs :law/cabinet-office-establishment-act)
+                        :fabricated-json fab-r
+                        :page (:entry healthy-page)
+                        :page-bytes (:resp healthy-page)
+                        :text-404 (:text-404 healthy-page)
+                        :form (:entry healthy-form)
+                        :form-bytes (:resp healthy-form)
+                        :links (:links healthy-form)
+                        :missing-doc missing-doc-r}
+                       entries))
+              st-skipped (filter :skipped? st)
+              st-bad (remove #(or (:skipped? %) (= (:expected %) (:actual %))) st)]
+
+          (doseq [r results]
+            (println (str (cond (= :ok (:reason r)) "  ok      "
+                                (refused? (:reason r)) "  REFUSED "
+                                :else "  FAIL    ")
+                          (:id r) "  " (:reason r) "  " (:detail r))))
+          (println)
+          (doseq [s st]
+            (println (str (cond (:skipped? s) "  self SKIP "
+                                (= (:expected s) (:actual s)) "  self ok   "
+                                :else "  self BAD  ")
+                          (:name s)
+                          (cond (:skipped? s) (str "  -- " (:detail s))
+                                (not= (:expected s) (:actual s))
+                                (str "  expected " (:expected s) " got " (:actual s))
+                                :else ""))))
+          (println)
+          (println (str "checked " (count results) " entries: "
+                        (count page-hosts) " host 404 probes, "
+                        (count statutes) " statutes, " (count controls) " law controls, "
+                        "1 fabricated-id control, " (count pages) " pages, "
+                        (count forms) " documents, 1 missing-document control, "
+                        (count page-hosts) " page-host checks, 1 statute-host check, "
+                        "1 token-coverage check; " (count st) " self-tests"
+                        (when (seq st-skipped)
+                          (str " (" (count st-skipped) " SKIPPED -- no healthy sample to"
+                               " doctor; those judges are unattested this run)"))))
+
+          (let [refused (filter #(refused? (:reason %)) results)
+                failed (filter #(and (not= :ok (:reason %)) (not (refused? (:reason %)))) results)]
+            (cond
+              (seq st-bad)
+              (do (println (str "REFUSED -- " (count st-bad)
+                                " self-test(s) returned a reason other than the one they name."
+                                " The judges are not behaving as documented, so this run's"
+                                " passes mean nothing."))
+                  (js/process.exit 2))
+
+              (seq refused)
+              (do (println (str "REFUSED -- " (count refused)
+                                " entry/entries could not be answered"))
+                  (js/process.exit 2))
+
+              (seq failed)
+              (do (println (str "FAIL -- " (count failed)
+                                " entry/entries disagree with the register"))
+                  (js/process.exit 1))
+
+              :else
+              (println (str "OK -- all " (count results)
+                            " entries agree with the live authorities")))))))
+     (.catch (fn [e]
+               (println "REFUSED -- verifier threw:" (str e))
+               (js/process.exit 2))))))
+
+(main)

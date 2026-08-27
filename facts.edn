@@ -1,0 +1,766 @@
+;; Regulatory source register for JPN-CAO cross-ministerial compliance
+;; navigation -- the Cabinet Office coordinated programmes this repository is
+;; about, and the statutes they run on.
+;;
+;; README.md says: every regulatory claim must cite the official CAO source.
+;; docs/business-model.md routes a legal conclusion the governor has not
+;; cleared to human sign-off.
+;;
+;; Until this file existed there was no such source. The documents required a
+;; citation against a set that did not exist, so nothing in this repository
+;; could tell a real citation from an invented one. This is that set.
+;;
+;; Shape is tx-data (a vector of entity maps), like every other EDN corpus in
+;; this workspace, so it loads with
+;;   (d/transact conn (edn/read-string (slurp "facts.edn")))
+;; :source/id is the join key. A regulation not in this table has NO
+;; spec-basis for this repository -- extend the table, never invent an id, a
+;; law id, or a URL.
+;;
+;; VERIFIED BY `nbb --classpath scripts scripts/verify-facts.cljs`, which
+;; re-fetches every entry from the live authority. Each entry carries a
+;; :source/verify tag naming WHICH check establishes it. The checks are NOT
+;; interchangeable, and the reasons are the main thing this file has to teach.
+;;
+;; Everything below was measured against these hosts on 2026-08-27. The
+;; sibling registers in this cohort are written against other agencies and
+;; their host notes DO NOT transfer.
+;;
+;; -- THIS REPOSITORY'S SUBJECT IS SPLIT ACROSS THREE PAGE HOSTS
+;;
+;; Not thoroughness -- forced. The Cabinet Office serves the two programmes
+;; this repository navigates from two different sites, and neither is the one
+;; its own front page is on:
+;;
+;;   www.cao.go.jp     the ministry proper (organisation, bills, addresses)
+;;   www8.cao.go.jp    規制改革 -- the regulatory-reform machinery and the
+;;                     所管省庁 proposal-and-answer channel
+;;   www.chisou.go.jp  地方創生推進事務局 -- 国家戦略特区 and the special-zone
+;;                     proposal route to 主務官庁
+;;
+;; A register written against one of them is silently missing two thirds of
+;; the repository's subject, and the three do not answer a missing page alike.
+;;
+;; -- www.cao.go.jp AND www8.cao.go.jp SERVE THE SAME 404 AND DIFFER ANYWAY
+;;
+;; Measured 2026-08-27. Both answer a fabricated path with status 404 and a
+;; body of 5452 bytes whose sha256 begins d807a1126cf0 -- byte for byte the
+;; same document, same title. They are not the same host:
+;;
+;;                             HEAD Content-Length     GET
+;;   www.cao.go.jp   404       (absent)                5452 B
+;;   www.cao.go.jp   front     (absent)                15720 B
+;;   www8.cao.go.jp  404       5452                    5452 B
+;;   www8.cao.go.jp  front     11494                   11494 B
+;;
+;; www8 reports an accurate Content-Length on HEAD for both. www sends none at
+;; all, for either. So a liveness check built on HEAD works on one of these
+;; two hosts and cannot distinguish anything on the other -- while both serve
+;; an identical 404 body that would make the two look interchangeable. Every
+;; check below issues a GET and reads the body.
+;;
+;; -- www.chisou.go.jp DOES NOT ANSWER 404. IT REDIRECTS.
+;;
+;; Measured 2026-08-27:
+;;
+;;   GET /zzz-no-such-page-9f3c2a1b8e/
+;;     302, content-type application/xml, content-length 0,
+;;     location /zzz-no-such-page-9f3c2a1b8e/index.html
+;;   ...which then answers 404 with 2508 bytes of HTML.
+;;
+;; A client that does not follow redirects sees a 302 and an empty body: not a
+;; live page, not a recognisable missing one, and nothing that says which.
+;; This is why scripts/host_probe.cljs sets redirect follow explicitly and
+;; documents it as required rather than incidental. One entry below holds the
+;; unfollowed 302 live so the claim cannot quietly stop being true.
+;;
+;; The same redirect answers a missing DOCUMENT: a fabricated .xlsx path comes
+;; back 404 text/html, 2508 bytes, first bytes EF BB BF 3C -- a UTF-8 BOM and
+;; then a tag. A form check that reads content-type alone would call that an
+;; Excel file that failed to parse; one that reads only status would be right
+;; here and wrong on a host that soft-404s. Both are checked, plus magic bytes.
+;;
+;; -- 地方創生 IS ON THE chisou 404 AND CANNOT BE A NEEDLE THERE
+;;
+;; Occurrences on each fetched 404 body, tags, scripts, styles and comments
+;; removed, measured 2026-08-27:
+;;
+;;                        www / www8 404     chisou 404
+;;   内閣府                    5                 0
+;;   地方創生                   0                 1
+;;   規制改革                   0                 0
+;;   規制改革推進会議               0                 0
+;;   国家戦略特別区域               0                 0
+;;   国家戦略特区                 0                 0
+;;   特区                     0                 0
+;;   提案                     0                 0
+;;   所管省庁                   0                 0
+;;   総合調整                   0                 0
+;;   地域再生                   0                 0
+;;   規制のサンドボックス             0                 0
+;;
+;; 内閣府 is the name of the agency this repository is about and it is on the
+;; CAO 404 five times. 地方創生 is the name of the programme office that
+;; serves 国家戦略特区 and it is on the chisou 404. Both are the first phrase
+;; anyone would reach for; both verify against a page that does not exist.
+;;
+;; The set is not guessable from how central a term feels -- it is a property
+;; of each host's chrome, and the two chromes are different. Needles here are
+;; therefore chosen by SUBTRACTING the live 404 body of THAT page's own host,
+;; and the verifier redoes that subtraction on every run against the right
+;; probe: a needle found on the fetched 404 REFUSES rather than passes.
+;;
+;; -- SIZE CANNOT IDENTIFY A DOCUMENT ON THESE HOSTS EITHER
+;;
+;; Every page this register cites, in characters, against its own host's 404
+;; (592 for www and www8, 148 for chisou), measured 2026-08-27:
+;;
+;;    307   p_index.html (実施計画・答申・意見書等)   285 SHORTER than its 404
+;;    413   kokusentoc/index.html                  +265
+;;    692   houan/index.html                       +100
+;;    773   kisei-kaikaku/index.html               +181
+;;    964   toc/document.html                      +816
+;;    979   about/pmf_index.html                   +387
+;;   1206   p_plan.html                            +614
+;;   1357   kokkasenryakutoc.html                  +1209
+;;   2025   about/address.html                     +1433
+;;   2270   hotline/h_index.html                   +1678
+;;   2427   kokusentoc/teian.html                  +2279
+;;   9220   toc/index.html                         +9072
+;;  40384   kisei/meeting/meeting.html             +39792
+;;
+;; The regulatory-reform publications index is a real, current, load-bearing
+;; page and it is SHORTER than the missing page on its own host. A
+;; did-I-get-a-substantial-body heuristic passes the 404 and doubts it.
+;;
+;; Nothing below asserts a size. The landing pages carry dated news items --
+;; kisei-kaikaku/index.html was listing 令和８年７月24日 when this was written
+;; -- so their length moves while the thing this register cites them for does
+;; not. Needles are the pages' own durable headings, never their news items.
+;;
+;; -- THE MEASURING INSTRUMENT WAS WRONG BEFORE IT WAS RIGHT
+;;
+;; The first pass of this file was measured with a de-tag ported unchanged
+;; from this cohort's MHLW register, and it did not remove <style> or <script>
+;; contents. The reason is in scripts/host_probe.cljs and it is worth knowing
+;; before trusting any character count in this workspace: in ClojureScript,
+;; clojure.string/replace rebuilds the regex it was handed and carries over
+;; only the g, i, m and u flags. The s flag -- dotAll -- is DROPPED. So
+;; #"(?is)<style.*?</style>" strips a one-line style element, strips an
+;; upper-case one, and silently fails on every multi-line one, which is all of
+;; them. The stylesheet stays in the document, the next rule strips its angle
+;; brackets but not its text, and CSS is counted as page text.
+;;
+;; On chisou's 404 that was 682 characters measured against 148 measured
+;; correctly: nearly three quarters of what a needle would have been
+;; subtracted from was stylesheet. A needle like container or margin would
+;; have been reported as appearing on the missing page.
+;;
+;; So there is one instrument, in scripts/host_probe.cljs, built with explicit
+;; js/RegExp flags. Every number above is regenerated by
+;;   nbb --classpath scripts scripts/measure-host.cljs
+;; which calls the same de-tag that verify-facts.cljs subtracts needles with.
+;; If you change de-tag, rerun measure-host and update these numbers.
+;;
+;; -- THE STATUTE HOST IS SHARED WITH THE COHORT AND ITS TRAPS ARE ITS OWN
+;;
+;; laws.e-gov.go.jp is the same authority the sibling registers use, and the
+;; corpus figures were re-counted here rather than copied. Over all 9550 laws,
+;; measured 2026-08-27:
+;;
+;;   repeal_status            None 8993, Repeal 414, LossOfEffectiveness 105,
+;;                            Expire 38
+;;   current_revision_status  CurrentEnforced 8869, Repeal 557,
+;;                            PreviousEnforced 110, UnEnforced 14
+;;   remain_in_force true     14, of which NOT repealed: 0
+;;
+;; The last line is the whole reason remain_in_force is never read as an
+;; in-force signal: it is true only on law that is already dead. This
+;; repository's nearest miss is one of those 14 and it has a control below.
+
+[;; -- HOSTS ----------------------------------------------------------------
+ ;; Declared per host because they do not behave alike, and a check written
+ ;; against one is wrong about the others. Measured at run time, not read off
+ ;; this register.
+
+ {:source/id :host/cao
+  :host/name "www.cao.go.jp"
+  :host/kind :page
+  :host/charset "utf-8"
+  :host/charset-in-header? false
+  :host/missing-status 404
+  :host/missing-title "404 Not Found - 内閣府"
+  :host/missing-probe "https://www.cao.go.jp/zzz-no-such-page-9f3c2a1b8e/"
+  :host/front-page "https://www.cao.go.jp/index.html"
+  :host/missing-redirects? false
+  :host/missing-longer-than-front? false
+  :host/head-reports-content-length? false
+  :host/chrome-needles ["内閣府"]
+  :source/verify :verify/page-host
+  :host/note
+  "Honest 404 by status and by title, and smaller than the front page. Serves
+   a body byte-identical to www8's 404 while behaving differently from it:
+   HEAD returns NO Content-Length here, for a live page or a missing one, so
+   nothing can be sized without a GET. Its chrome carries 内閣府 five times --
+   the name of the agency this whole repository is about -- so that phrase
+   verifies against a deleted page and is listed in :host/chrome-needles
+   rather than left for an author to rediscover. Declares charset only inside
+   the document; the header is a bare text/html, so bodies are decoded with a
+   fatal decoder and an undecodable body REFUSES rather than reporting a
+   missing needle."
+  :host/measured "2026-08-27"}
+
+ {:source/id :host/cao8
+  :host/name "www8.cao.go.jp"
+  :host/kind :page
+  :host/charset "utf-8"
+  :host/charset-in-header? false
+  :host/missing-status 404
+  :host/missing-title "404 Not Found - 内閣府"
+  :host/missing-probe "https://www8.cao.go.jp/zzz-no-such-page-9f3c2a1b8e/"
+  :host/front-page "https://www8.cao.go.jp/kisei-kaikaku/index.html"
+  :host/missing-redirects? false
+  :host/missing-longer-than-front? false
+  :host/head-reports-content-length? true
+  :host/shares-404-body-with "www.cao.go.jp"
+  :host/chrome-needles ["内閣府"]
+  :source/verify :verify/page-host
+  :host/note
+  "The regulatory-reform host. Serves the SAME 404 document as www.cao.go.jp
+   -- same bytes, same sha -- and is nevertheless a different host: HEAD
+   reports an accurate Content-Length here for both the missing page and a
+   live one. Two hosts that share a 404 body are the reason :host entries
+   exist per host rather than per site. Titles on this host carry literal
+   &nbsp; sequences and are recorded verbatim; see the page entries. The
+   shortest page in this register lives here and is 285 characters SHORTER
+   than this 404."
+  :host/measured "2026-08-27"}
+
+ {:source/id :host/chisou
+  :host/name "www.chisou.go.jp"
+  :host/kind :page
+  :host/charset "utf-8"
+  :host/charset-in-header? false
+  :host/missing-status 404
+  :host/missing-status-unfollowed 302
+  :host/missing-title "Page Not Found - お探しのページが見つかりませんでした - 地方創生 - "
+  :host/missing-probe "https://www.chisou.go.jp/zzz-no-such-page-9f3c2a1b8e/"
+  :host/missing-final-url "https://www.chisou.go.jp/zzz-no-such-page-9f3c2a1b8e/index.html"
+  :host/missing-doc-probe "https://www.chisou.go.jp/tiiki/kokusentoc/pdf/no-such-form-9f3c2a1b.xlsx"
+  :host/missing-doc-magic "efbbbf3c"
+  :host/front-page "https://www.chisou.go.jp/index.html"
+  :host/missing-redirects? true
+  :host/missing-longer-than-front? false
+  :host/head-reports-content-length? true
+  :host/chrome-needles ["地方創生"]
+  :source/verify :verify/page-host
+  :host/note
+  "地方創生推進事務局 -- 国家戦略特区 and the special-zone proposal route. Does
+   NOT answer a missing page directly: it sends 302 to <path>/index.html with
+   an empty application/xml body, and only that answers 404. An unfollowed
+   request therefore sees neither a live page nor a missing one. The
+   verifier holds the unfollowed 302 live so this cannot quietly stop being
+   true. Its chrome carries 地方創生, which is the name of the office serving
+   every page this register cites here, so that phrase is unusable as a needle
+   on this host. Note the trailing space inside its 404 title element -- it is
+   in the document, and a check that trimmed would assert something the page
+   does not say. Its front page is titled 地方創生（工事中）; a missing document
+   is served as 404 HTML beginning with a UTF-8 BOM."
+  :host/measured "2026-08-27"}
+
+ {:source/id :host/e-gov
+  :host/name "laws.e-gov.go.jp"
+  :host/kind :statute-api
+  :host/api-base "https://laws.e-gov.go.jp/api/2/laws?law_id="
+  :host/listing-base "https://laws.e-gov.go.jp/api/2/laws"
+  :host/live-repeal-token "None"
+  :host/repeal-tokens ["Repeal" "Expire" "LossOfEffectiveness"]
+  :host/enforced-token "CurrentEnforced"
+  :host/revision-tokens ["CurrentEnforced" "Repeal" "PreviousEnforced" "UnEnforced"]
+  :host/uncontrolled-revision-tokens ["UnEnforced"]
+  :host/repeal-fields-in "revision_info"
+  :host/identity-fields-in "law_info"
+  :host/fabricated-id-status 200
+  :host/corpus-size 9550
+  :source/verify :verify/statute-host
+  :host/note
+  "The listing endpoint answers a fabricated law id with 200 and total_count
+   0, so no check here reads its status. Identity is total_count = 1 plus an
+   exact law_id match. The fields are split across two objects and the split
+   is not intuitive: law_num and promulgation_date are in law_info, while
+   law_title, repeal_status and current_revision_status are in revision_info.
+   Read from the wrong one they come back nil, and nil is one keystroke from
+   the live not-repealed token None while meaning the opposite. Presence of
+   the field is therefore asserted separately from its value. Being in force
+   is repeal_status AND current_revision_status, because neither alone is
+   sufficient, and remain_in_force is not a third opinion -- counted over the
+   whole corpus it is true on 14 laws and NONE of them is unrepealed. Token
+   sets are counted over all 9550 rows, not assumed. Three of the four
+   revision tokens are held live by controls; UnEnforced deliberately is NOT,
+   and that is named in :host/uncontrolled-revision-tokens rather than left
+   silent -- an UnEnforced law becomes CurrentEnforced on its own enforcement
+   date, so pinning one as a control would schedule a false failure. The
+   verifier prints it as uncontrolled on every run instead of reporting
+   four-of-four coverage."
+  :host/measured "2026-08-27"}
+
+ ;; -- STATUTES -------------------------------------------------------------
+ ;; The spec-basis for every regulatory claim this repository is allowed to
+ ;; make. Each is checked on identity (total_count, law_id, title, number,
+ ;; type, promulgation date) and on being in force (repeal_status present AND
+ ;; None, current_revision_status CurrentEnforced).
+
+ {:source/id :law/cabinet-office-establishment-act
+  :law/id "411AC0000000089"
+  :law/title "内閣府設置法"
+  :law/num "平成十一年法律第八十九号"
+  :law/type "Act"
+  :law/promulgated "1999-07-16"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "The Act that creates the Cabinet Office and gives it the 総合調整
+   cross-ministerial coordination function. This is the statutory basis for
+   the ONE claim this repository rests on -- that a Cabinet-Office-coordinated
+   programme can span more than one ministry's jurisdiction. Without it the
+   README's premise has no source. Note that 内閣府 alone is on this site's 404
+   page and cannot be used as a page needle."}
+
+ {:source/id :law/cabinet-act
+  :law/id "322AC0000000005"
+  :law/title "内閣法"
+  :law/num "昭和二十二年法律第五号"
+  :law/type "Act"
+  :law/promulgated "1947-01-16"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "The Cabinet Act the Cabinet Office sits under. Cited for the boundary
+   docs/business-model.md draws: this repository advises an operator, it does
+   not act for the Cabinet."}
+
+ {:source/id :law/national-strategic-special-zones-act
+  :law/id "425AC0000000107"
+  :law/title "国家戦略特別区域法"
+  :law/num "平成二十五年法律第百七号"
+  :law/type "Act"
+  :law/promulgated "2013-12-13"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "国家戦略特区 -- the live special-zone regime, and the route by which a
+   proposal reaches 主務官庁 across ministries. The eligibility screening this
+   repository navigates runs on this Act. Distinguish it from 構造改革特別区域法
+   and 総合特別区域法, which are different regimes and are NOT interchangeable
+   with it; one of them is a control below."}
+
+ {:source/id :law/industrial-competitiveness-enhancement-act
+  :law/id "425AC0000000098"
+  :law/title "産業競争力強化法"
+  :law/num "平成二十五年法律第九十八号"
+  :law/type "Act"
+  :law/promulgated "2013-12-11"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "The CURRENT statutory basis for the regulatory sandbox and the grey-zone
+   clearance system. This matters more than it looks: the sandbox was created
+   by a different Act which has since been repealed, and that repealed Act is
+   a control below precisely because citing it is the plausible mistake."}
+
+ {:source/id :law/regional-revitalization-act
+  :law/id "417AC0000000024"
+  :law/title "地域再生法"
+  :law/num "平成十七年法律第二十四号"
+  :law/type "Act"
+  :law/promulgated "2005-04-01"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "地域再生 -- the regional-revitalization scheme README.md names as an example
+   of a Cabinet-Office-coordinated programme."}
+
+ {:source/id :law/comprehensive-special-zones-act
+  :law/id "423AC0000000081"
+  :law/title "総合特別区域法"
+  :law/num "平成二十三年法律第八十一号"
+  :law/type "Act"
+  :law/promulgated "2011-06-29"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "総合特区, the second of the three special-zone regimes and still in force.
+   Carried so that a draft naming the wrong regime can be caught against a
+   register that holds all three apart."}
+
+ {:source/id :law/machi-hito-shigoto-act
+  :law/id "426AC0000000136"
+  :law/title "まち・ひと・しごと創生法"
+  :law/num "平成二十六年法律第百三十六号"
+  :law/type "Act"
+  :law/promulgated "2014-11-28"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "The 地方創生 framework Act, administered through the Cabinet Office office
+   that serves the chisou host above."}
+
+ {:source/id :law/central-government-reform-basic-act
+  :law/id "410AC0000000103"
+  :law/title "中央省庁等改革基本法"
+  :law/num "平成十年法律第百三号"
+  :law/type "Act"
+  :law/promulgated "1998-06-12"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "The 1998 reform Act under which the Cabinet Office was constituted. Cited
+   for why the coordination function sits where it does."}
+
+ {:source/id :law/administrative-procedure-act
+  :law/id "405AC0000000088"
+  :law/title "行政手続法"
+  :law/num "平成五年法律第八十八号"
+  :law/type "Act"
+  :law/promulgated "1993-11-12"
+  :law/repeal-status "None"
+  :law/revision-status "CurrentEnforced"
+  :source/verify :verify/statute
+  :source/covers
+  "Standard-of-review and disposition procedure for any filing this repository
+   drafts. The reason :filing/submit is never in a phase's :auto set is a
+   policy decision, but the procedural duties it respects are here."}
+
+ ;; -- CONTROLS -------------------------------------------------------------
+ ;; OUTSIDE this repository's set of citable propositions and cited for NONE
+ ;; of them. They exist so that the repeal, revision and identity checks are
+ ;; checks rather than constants. Removing one does not weaken a citation; it
+ ;; turns the check that depended on it into something that cannot fail.
+
+ {:source/id :law/fabricated-id-control
+  :law/id "999AC0000000999"
+  :control/expect-status 200
+  :control/expect-total-count 0
+  :source/verify :verify/fabricated-id
+  :source/covers
+  "Not a law. Holds live the fact that the listing endpoint answers a
+   fabricated id with 200 -- the reason no check here reads its status. If
+   this ever 404s, the header is stale and this fails loudly."}
+
+ {:source/id :law/repealed-sandbox-control
+  :law/id "430AC0000000025"
+  :law/title "生産性向上特別措置法"
+  :law/num "平成三十年法律第二十五号"
+  :law/type "Act"
+  :law/promulgated "2018-05-23"
+  :law/repeal-status "Repeal"
+  :law/repeal-date "2021-08-02"
+  :law/remain-in-force true
+  :law/revision-status "Repeal"
+  :source/verify :verify/control-repealed
+  :source/covers
+  "THE nearest miss in this corpus, and the reason this section is not
+   decorative. This is the Act that CREATED the regulatory sandbox in 2018. It
+   was repealed in 2021 when the sandbox moved to 産業競争力強化法, and it is
+   one of only fourteen laws in 9550 flagged remain_in_force -- so it fails a
+   repeal check and PASSES an in-force check built on remain_in_force. An
+   author extending this register with sandbox statutes would reach for it by
+   name before reaching for the Act that replaced it. Cited for no
+   proposition; the checks must reject it, and this entry asserts they still
+   do."}
+
+ {:source/id :law/expired-regional-control
+  :law/id "412AC1000000015"
+  :law/title "過疎地域自立促進特別措置法"
+  :law/num "平成十二年法律第十五号"
+  :law/type "Act"
+  :law/promulgated "2000-03-31"
+  :law/repeal-status "Expire"
+  :law/repeal-date "2021-04-01"
+  :law/revision-status "Repeal"
+  :source/verify :verify/control-repealed
+  :source/covers
+  "Depopulated-area support, expired 2021 and replaced. Regional policy in the
+   Cabinet Office's own space, cited for no proposition. Holds the Expire
+   token live -- a repeal check that only knows the string Repeal passes this
+   one. It is deliberately a plausible regional-revitalization citation rather
+   than an obscure statute, because the mistake it guards is reaching for a
+   familiar regional Act."}
+
+ {:source/id :law/repealed-special-zone-ordinance-control
+  :law/id "421M60000010054"
+  :law/title "法務省関係構造改革特別区域法第三十四条に規定する政令等規制事業に係る省令の特例に関する措置を定める省令"
+  :law/num "平成二十一年法務省令第五十四号"
+  :law/type "MinisterialOrdinance"
+  :law/promulgated "2009-12-25"
+  :law/repeal-status "Repeal"
+  :law/repeal-date "2017-11-01"
+  :law/revision-status "Repeal"
+  :source/verify :verify/control-repealed
+  :source/covers
+  "A Ministry-of-Justice ordinance made under the structural-reform special
+   zones Act -- literally a cross-ministerial special-zone instrument, which
+   is this repository's subject matter, and repealed in 2017. Cited for no
+   proposition. It is here because the repository's own framing invites an
+   author to add per-ministry special-zone ordinances, and this is what one
+   that has died looks like."}
+
+ {:source/id :law/loss-of-effectiveness-control
+  :law/id "319AC0000000004"
+  :law/title "昭和十九年法律第四号（経済関係罰則ノ整備ニ関スル法律）"
+  :law/num "昭和十九年法律第四号"
+  :law/type "Act"
+  :law/promulgated "1944-02-10"
+  :law/repeal-status "LossOfEffectiveness"
+  :law/repeal-date "2021-11-22"
+  :law/revision-status "Repeal"
+  :source/verify :verify/control-repealed
+  :source/covers
+  "Wartime economic penalties, lost effect in 2021. Nothing to do with the
+   Cabinet Office; carried only because it holds the third repeal token live.
+   Three tokens are observed in this corpus and all three have a control
+   here."}
+
+ {:source/id :law/previous-enforced-control
+  :law/id "414AC0000000189"
+  :law/title "構造改革特別区域法"
+  :law/num "平成十四年法律第百八十九号"
+  :law/type "Act"
+  :law/promulgated "2002-12-18"
+  :law/repeal-status "None"
+  :law/revision-status "PreviousEnforced"
+  :source/verify :verify/control-previous-enforced
+  :source/covers
+  "構造改革特区, the first of the three special-zone regimes. NOT repealed --
+   and the revision the API serves is nevertheless not the one in force, so a
+   check reading only repeal_status hands back superseded text while
+   reporting success. This is the most uncomfortable entry in the file: it is
+   squarely in this repository's subject matter and it is here as a control,
+   because its current revision status is PreviousEnforced. It is cited for no
+   proposition for exactly that reason. A draft that needs the structural
+   reform regime must resolve the enforced revision first, not read this
+   entry."}
+
+ ;; -- PAGES ----------------------------------------------------------------
+ ;; Each is checked on status 200, an exact title element, and a needle that
+ ;; is re-subtracted from the LIVE 404 body of THAT page's own host every run.
+ ;; Needles are the pages' own durable headings, never their news items -- the
+ ;; landing pages carry dated notices that will be gone next month, and a
+ ;; needle taken from one of those would fail as though the page had died.
+ ;;
+ ;; Titles on www8.cao.go.jp are recorded with their literal &nbsp; sequences.
+ ;; They are in the document. A check that decoded entities would be asserting
+ ;; a string the page does not contain.
+
+ {:source/id :page/regulatory-reform
+  :page/url "https://www8.cao.go.jp/kisei-kaikaku/index.html"
+  :page/host :host/cao8
+  :page/title "規制改革&nbsp;-&nbsp;内閣府"
+  :page/needle "規制改革関係府省庁連絡会議"
+  :source/verify :verify/page
+  :source/covers
+  "The Cabinet Office regulatory-reform landing page. The needle is the
+   cross-ministerial liaison conference -- the mechanism this repository
+   claims to navigate -- and not 規制改革, which is the site section name and
+   would still match if this page became a section index of something else."}
+
+ {:source/id :page/reform-hotline
+  :page/url "https://www8.cao.go.jp/kisei-kaikaku/kisei/hotline/h_index.html"
+  :page/host :host/cao8
+  :page/title "受け付けた提案及び所管省庁からの回答：「規制改革ホットライン」&nbsp;:&nbsp;規制改革&nbsp;-&nbsp;内閣府"
+  :page/needle "所管省庁に検討要請"
+  :source/verify :verify/page
+  :source/covers
+  "The proposal-and-answer channel itself: a proposal is received, the Cabinet
+   Office refers it to the ministry with jurisdiction, and the answer is
+   published. This is the concrete cross-ministerial route README.md's core
+   contract abstracts. The needle is the referral step, which is the
+   proposition it would be cited for. Note the title element uses a full-width
+   ：before the quoted programme name and half-width :&nbsp; after it -- both
+   are in the document."}
+
+ {:source/id :page/reform-implementation-plan
+  :page/url "https://www8.cao.go.jp/kisei-kaikaku/kisei/publication/p_plan.html"
+  :page/host :host/cao8
+  :page/title "規制改革実施計画&nbsp;:&nbsp;規制改革&nbsp;-&nbsp;内閣府"
+  :page/needle "閣議決定"
+  :source/verify :verify/page
+  :source/covers
+  "規制改革実施計画 -- the Cabinet-decision plan that binds ministries to the
+   reforms. The needle is 閣議決定 rather than the plan's own name, because the
+   plan's name is already in this page's title and a needle that only repeats
+   the title checks nothing the title check did not."}
+
+ {:source/id :page/reform-publications
+  :page/url "https://www8.cao.go.jp/kisei-kaikaku/kisei/publication/p_index.html"
+  :page/host :host/cao8
+  :page/title "実施計画・答申・意見書等&nbsp;:&nbsp;規制改革&nbsp;-&nbsp;内閣府"
+  :page/needle "規制改革推進に関する答申等"
+  :source/verify :verify/page
+  :source/covers
+  "Index of plans, answers and opinions. In text this page is 307 characters,
+   285 SHORTER than its own host's 404 body -- the shortest real page in this
+   register and the one that makes a body-size heuristic indefensible here."}
+
+ {:source/id :page/special-zone-overview
+  :page/url "https://www.chisou.go.jp/tiiki/kokusentoc/kokkasenryakutoc.html"
+  :page/host :host/chisou
+  :page/title "制度概要"
+  :page/needle "主務官庁へ検討要請"
+  :source/verify :verify/page
+  :source/covers
+  "国家戦略特区's own description of its four-step proposal route, including
+   the step where the secretariat refers a proposal to the competent ministry.
+   The needle is that step. Note the bare title -- this page's title element
+   is 制度概要 and nothing else, with no site suffix, unlike its siblings on the
+   same host."}
+
+ {:source/id :page/special-zone-proposals
+  :page/url "https://www.chisou.go.jp/tiiki/kokusentoc/teian.html"
+  :page/host :host/chisou
+  :page/title "規制改革の提案方法と各府省庁の回答について"
+  :page/needle "各府省庁の回答"
+  :source/verify :verify/page
+  :source/covers
+  "How to propose a regulatory change and where the ministries' answers are
+   published. This is the special-zone counterpart to the regulatory-reform
+   hotline above, and the two together are why this repository claims a
+   cross-ministerial route exists at all."}
+
+ {:source/id :page/special-zone-systems
+  :page/url "https://www.chisou.go.jp/tiiki/toc/index.html"
+  :page/host :host/chisou
+  :page/title "特区制度について - 地方創生推進事務局"
+  :page/needle "構造改革特区"
+  :source/verify :verify/page
+  :source/covers
+  "The page that holds the three special-zone regimes apart. Cited for the
+   distinction the statute entries above depend on."}
+
+ {:source/id :page/special-zone-documents
+  :page/url "https://www.chisou.go.jp/tiiki/toc/document.html"
+  :page/host :host/chisou
+  :page/title "特区制度に関する資料 - 地方創生推進事務局"
+  :page/needle "特区制度に関する資料"
+  :source/verify :verify/page
+  :source/covers
+  "Document index for the special-zone regimes; the forms below are reached
+   from this area of the site."}
+
+ {:source/id :page/cao-organisation
+  :page/url "https://www.cao.go.jp/about/pmf_index.html"
+  :page/host :host/cao
+  :page/title "組織・業務の概要2025：内閣府のパンフレット - 内閣府"
+  :page/needle "組織・業務の概要"
+  :source/verify :verify/page
+  :source/covers
+  "The Cabinet Office's own statement of what it is and does. Cited by
+   docs/business-model.md for the boundary between this repository and the
+   agency. Its title carries a year, so this entry will need updating when the
+   2026 edition lands -- that is the check working, not failing."}
+
+ {:source/id :page/cao-bills
+  :page/url "https://www.cao.go.jp/houan/index.html"
+  :page/host :host/cao
+  :page/title "国会提出法案 - 内閣府"
+  :page/needle "国会提出法案"
+  :source/verify :verify/page
+  :source/covers
+  "Bills the Cabinet Office has submitted to the Diet. The forward-looking
+   half of the statute table: a compliance draft written against current law
+   is wrong if the rule is already before the Diet, and this is where that is
+   visible."}
+
+ {:source/id :page/cao-address
+  :page/url "https://www.cao.go.jp/about/address.html"
+  :page/host :host/cao
+  :page/title "所在地情報 - 内閣府"
+  :page/needle "中央合同庁舎"
+  :source/verify :verify/page
+  :source/covers
+  "Where filings physically go. organization.edn records an address; this is
+   the source it must agree with."}
+
+ ;; -- DOCUMENTS ------------------------------------------------------------
+ ;; The proposal forms and the published plans. Checked on status,
+ ;; content-type, magic bytes, and on the citing page still LINKING to them --
+ ;; a file nothing cites any more is an orphaned citation that no check on the
+ ;; file alone can see. On the chisou host a deleted document answers 404 with
+ ;; HTML, so status alone is not enough and content-type alone is worse.
+
+ {:source/id :form/special-zone-proposal
+  :form/url "https://www.chisou.go.jp/tiiki/kokusentoc/zuijiteianyoshiki.xlsx"
+  :form/name "国家戦略特区 提案様式（随時提案）"
+  :form/kind :xlsx
+  :form/magic "504b0304"
+  :form/linked-from "https://www.chisou.go.jp/tiiki/kokusentoc/teian.html"
+  :form/basis ["国家戦略特別区域法"]
+  :source/verify :verify/form
+  :source/covers
+  "The actual proposal form an operator files to start the cross-ministerial
+   route. This is the artifact this repository's gated filing phase produces,
+   and the one thing in the register that is a filing rather than a
+   description of one. .xlsx is a ZIP container, so its magic bytes are PK -- 
+   the same first four bytes any Office document would have, which is why the
+   content-type is checked alongside them and neither is trusted alone."}
+
+ {:source/id :form/special-zone-proposal-guide
+  :form/url "https://www.chisou.go.jp/tiiki/kokusentoc/toc_zuijiteian.pdf"
+  :form/name "随時提案の手引き"
+  :form/kind :pdf
+  :form/magic "25504446"
+  :form/linked-from "https://www.chisou.go.jp/tiiki/kokusentoc/teian.html"
+  :form/basis ["国家戦略特別区域法"]
+  :source/verify :verify/form
+  :source/covers
+  "The secretariat's own instructions for completing the proposal. Carried as
+   a PDF so the magic-byte check exercises both branches: %PDF here against PK
+   above."}
+
+ {:source/id :form/special-zone-overview-deck
+  :form/url "https://www.chisou.go.jp/tiiki/kokusentoc/pdf/kokkasenryakutoc01.pdf"
+  :form/name "国家戦略特区 制度概要資料"
+  :form/kind :pdf
+  :form/magic "25504446"
+  :form/linked-from "https://www.chisou.go.jp/tiiki/kokusentoc/kokkasenryakutoc.html"
+  :form/basis ["国家戦略特別区域法"]
+  :source/verify :verify/form
+  :source/covers
+  "The regime overview the secretariat publishes. Linked from the overview
+   page rather than the proposal page, so the link check exercises a second
+   citing page."}
+
+ {:source/id :form/regional-proposal-call
+  :form/url "https://www.chisou.go.jp/tiiki/kokusentoc/pdf/zuijiboshur8.xlsx"
+  :form/name "令和８年度 随時募集様式"
+  :form/kind :xlsx
+  :form/magic "504b0304"
+  :form/linked-from "https://www.chisou.go.jp/tiiki/kokusentoc/teian.html"
+  :form/basis ["国家戦略特別区域法"]
+  :source/verify :verify/form
+  :source/covers
+  "The current fiscal year's rolling call. Dated in its own filename, so when
+   this stops being linked the failure is a real one: the year moved and the
+   register did not."}
+
+ {:source/id :form/reform-implementation-plan-2026
+  :form/url "https://www8.cao.go.jp/kisei-kaikaku/kisei/publication/program/260721/01_program.pdf"
+  :form/name "規制改革実施計画（令和８年７月21日閣議決定）"
+  :form/kind :pdf
+  :form/magic "25504446"
+  :form/linked-from "https://www8.cao.go.jp/kisei-kaikaku/kisei/publication/p_plan.html"
+  :form/basis ["行政手続法"]
+  :source/verify :verify/form
+  :source/covers
+  "The Cabinet-decision text itself, on the other host. Every commitment a
+   ministry has made under the regulatory-reform process is in here, which
+   makes it the one document a compliance draft can cite for what a ministry
+   has already agreed to do."}]
