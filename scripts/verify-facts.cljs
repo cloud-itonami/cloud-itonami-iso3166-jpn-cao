@@ -72,9 +72,115 @@
 (ns verify-facts
   (:require ["fs" :as fs]
             [clojure.edn :as edn]
-            [clojure.string :as str]
-            [host-probe :refer [decode-utf8-strict fetch-bytes fetch-head fetch-json
-                                fetch-no-redirect page-title de-tag]]))
+            [clojure.string :as str]))
+
+;; -- host-probe, INLINED ----------------------------------------------------
+;; The measuring instruments were a sibling namespace (scripts/host_probe.cljs).
+;; The fleet gate runs `nbb scripts/verify-facts.cljs` with no --classpath, so a
+;; cross-file namespace require cannot resolve when THIS script is the entry
+;; point. The functions are inlined here verbatim so the gate's invocation runs
+;; the SAME checks cao's own invocation (nbb --classpath scripts ...) runs.
+;; scripts/host_probe.cljs remains the source for scripts/measure-host.cljs;
+;; the inlined copies below must stay byte-identical to it.
+
+(def ua "cloud-itonami-iso3166-jpn-cao facts verifier")
+
+(defn decode-utf8-strict
+  "nil when the bytes are not valid UTF-8. Callers must treat nil as REFUSED,
+   never as an empty page: the difference between a dead citation and an
+   unreadable one is the whole reason exit 2 exists.
+
+   All three page hosts in this register send a bare text/html with no charset
+   parameter and declare UTF-8 only inside the document, so a decoder that
+   substitutes replacement characters would turn an encoding change into a
+   missing needle -- a finding about the wrong thing."
+  [bytes]
+  (try (.decode (js/TextDecoder. "utf-8" #js {:fatal true}) bytes)
+       (catch :default _ nil)))
+
+(defn fetch-bytes
+  "Bytes, not text. Decoding is a decision each check makes for itself: the
+   published documents are not text at all, and getting that wrong is silent.
+
+   redirect follow is REQUIRED, not incidental. www.chisou.go.jp answers a
+   missing page with 302 to <path>/index.html and a zero-length body of
+   content-type application/xml; only after following it does a 404 appear.
+   A client that does not follow sees status 302 and no body, which is neither
+   a live page nor a recognisable missing one."
+  [url]
+  (-> (js/fetch url #js {:redirect "follow" :headers #js {"User-Agent" ua}})
+      (.then (fn [r]
+               (.then (.arrayBuffer r)
+                      (fn [ab] {:status (.-status r)
+                                :url (.-url r)
+                                :redirected (.-redirected r)
+                                :ctype (or (.get (.-headers r) "content-type") "")
+                                :bytes (js/Uint8Array. ab)}))))
+      (.catch (fn [e] {:error (str e)}))))
+
+(defn fetch-no-redirect
+  "The same request with redirects left unfollowed, for the one entry that
+   asserts chisou's missing-page redirect is real. Nothing else uses it."
+  [url]
+  (-> (js/fetch url #js {:redirect "manual" :headers #js {"User-Agent" ua}})
+      (.then (fn [r] {:status (.-status r)
+                      :type (.-type r)}))
+      (.catch (fn [e] {:error (str e)}))))
+
+(defn fetch-head
+  "HEAD, for the entries that assert what HEAD can and cannot tell you on each
+   host. No liveness check uses it."
+  [url]
+  (-> (js/fetch url #js {:method "HEAD" :redirect "follow"
+                         :headers #js {"User-Agent" ua}})
+      (.then (fn [r] {:status (.-status r)
+                      :content-length (.get (.-headers r) "content-length")}))
+      (.catch (fn [e] {:error (str e)}))))
+
+(defn fetch-json
+  "Parsed JSON with the status alongside it. The status is returned but the
+   statute judge must not branch on it -- the listing endpoint answers a
+   fabricated law id with 200."
+  [url]
+  (-> (js/fetch url #js {:redirect "follow" :headers #js {"User-Agent" ua}})
+      (.then (fn [r]
+               (.then (.text r)
+                      (fn [t]
+                        (try {:status (.-status r) :json (js->clj (js/JSON.parse t))}
+                             (catch :default _ {:status (.-status r) :bad-json true}))))))
+      (.catch (fn [e] {:error (str e)}))))
+
+(defn page-title
+  "The title element's contents, VERBATIM. Not trimmed and entities NOT
+   decoded: every www8.cao.go.jp title in this register carries literal
+   &nbsp; sequences, and a check that decoded them would be asserting a string
+   the document does not contain."
+  [html]
+  (when-let [m (re-find #"<title>([\s\S]*?)</title>" html)]
+    (second m)))
+
+;; Built with js/RegExp so the dotAll flag actually reaches the match. See the
+;; header -- #"(?is)" loses it inside clojure.string/replace.
+(def ^:private re-script (js/RegExp. "<script[\\s\\S]*?</script>" "gis"))
+(def ^:private re-style  (js/RegExp. "<style[\\s\\S]*?</style>" "gis"))
+(def ^:private re-comment (js/RegExp. "<!--[\\s\\S]*?-->" "gis"))
+(def ^:private re-tag    (js/RegExp. "<[^>]+>" "gis"))
+
+(defn de-tag
+  "The one text extractor. Every character count in facts.edn's header and
+   every needle subtraction in verify-facts.cljs goes through this.
+
+   Script, style and comment CONTENTS are removed before tags are, because
+   stripping angle brackets alone leaves their source behind as prose."
+  [html]
+  (-> html
+      (str/replace re-script " ")
+      (str/replace re-style " ")
+      (str/replace re-comment " ")
+      (str/replace re-tag " ")
+      (str/replace #"\s+" " ")
+      str/trim))
+
 
 ;; -- refusal ---------------------------------------------------------------
 
@@ -796,6 +902,17 @@
                                 (str "  expected " (:expected s) " got " (:actual s))
                                 :else ""))))
           (println)
+          ;; The fleet gate (scripts/itonami-verify-proposal.cljs) reads a
+          ;; machine contract off this verifier's stdout: one SELF-TEST\tok\t
+          ;; line per passing self-test (floor 5) and a SCANNED\tN\tof N line
+          ;; with N>0. cao reports its self-tests in its own richer format
+          ;; above; these lines restate the SAME passing verdicts in the gate's
+          ;; vocabulary, so the run cao considers OK is one the gate can read.
+          ;; No check is added or weakened here -- this is output only.
+          (doseq [s st]
+            (when (and (not (:skipped? s)) (= (:expected s) (:actual s)))
+              (println (str "SELF-TEST\tok\t" (:name s)))))
+          (println (str "SCANNED\t" (count results) "\tof " (count results)))
           (println (str "checked " (count results) " entries: "
                         (count page-hosts) " host 404 probes, "
                         (count statutes) " statutes, " (count controls) " law controls, "

@@ -179,7 +179,7 @@
     :why "the token frequencies in facts.edn's header are a claim about a
           specific corpus. If it changes they are stale, and nothing else here
           would say so."
-    :facts (mutate ":host/corpus-size 9550" ":host/corpus-size 9549")
+    :facts (mutate ":host/corpus-size 9551" ":host/corpus-size 9549")
     :exit 1
     :expect-in-output ":host/corpus-size-changed"}])
 
