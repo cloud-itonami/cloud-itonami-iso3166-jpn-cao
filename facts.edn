@@ -166,7 +166,11 @@
 ;;
 ;; laws.e-gov.go.jp is the same authority the sibling registers use, and the
 ;; corpus figures were re-counted here rather than copied. Over all 9550 laws,
-;; measured 2026-08-27:
+;; measured 2026-08-27. The law corpus has since grown: the listing endpoint
+;; reports total_count 9551 (measured 2026-09-08 while landing this register).
+;; :host/corpus-size below carries the LIVE count the verifier enforces; the
+;; 2026-08-27 token frequencies in this header were NOT re-tallied over 9551,
+;; and are recorded as the 9550-corpus measurement they are.
 ;;
 ;;   repeal_status            None 8993, Repeal 414, LossOfEffectiveness 105,
 ;;                            Expire 38
@@ -281,7 +285,7 @@
   :host/repeal-fields-in "revision_info"
   :host/identity-fields-in "law_info"
   :host/fabricated-id-status 200
-  :host/corpus-size 9550
+  :host/corpus-size 9551
   :source/verify :verify/statute-host
   :host/note
   "The listing endpoint answers a fabricated law id with 200 and total_count

@@ -72,7 +72,16 @@ Every entry is re-fetched from the live authority by:
 nbb --classpath scripts scripts/verify-facts.cljs     # 0 ok / 1 wrong / 2 REFUSED
 nbb --classpath scripts scripts/break-tests.cljs      # does that script actually go red?
 nbb --classpath scripts scripts/measure-host.cljs     # regenerate the header's numbers
+nbb scripts/mutation-check.cljs                       # the fleet gate's in-repo suite (tally)
 ```
+
+The fleet gate (`scripts/itonami-verify-proposal.cljs`) needs the verifier to run
+under **its** bare invocation (`nbb scripts/verify-facts.cljs`), so the measuring
+functions that were a sibling namespace (`scripts/host_probe.cljs`) are inlined
+into `scripts/verify-facts.cljs` as well. Run it WITH or WITHOUT `--classpath scripts` --
+the checks are identical either way. `scripts/mutation-check.cljs` restates cao's
+own `break-tests.cljs` cases in the gate's `caught=/not-caught=` tally so the gate
+can read cao's discrimination before it will land a proposal against this repository.
 
 **Exit 2 is not a pass.** A run that could not answer — an unreadable body, a
 404 probe that stopped 404ing, a needle that has drifted into site chrome —
