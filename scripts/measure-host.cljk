@@ -1,6 +1,6 @@
 ;; Regenerate every measurement facts.edn's header states.
 ;;
-;;   nbb --classpath scripts scripts/measure-host.cljk [--no-corpus]
+;;   kbb --backend sci --classpath scripts scripts/measure-host.cljk [--no-corpus]
 ;;
 ;; This exists so the header's numbers are reproducible with the SAME de-tag
 ;; verify-facts.cljs subtracts needles with -- see scripts/host_probe.cljk for

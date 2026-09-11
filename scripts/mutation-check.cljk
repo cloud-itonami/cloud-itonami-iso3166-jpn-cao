@@ -6,7 +6,7 @@
 ;; knows cao's verifier still discriminates before it will accept a proposal
 ;; against this repository.
 ;;
-;;   nbb scripts/mutation-check.cljk
+;;   kbb --backend sci scripts/mutation-check.cljk
 ;;
 ;; WHY THE REASON AND NOT THE COLOUR.
 ;; A negative test that asserts only "the run went red" counts a run that went

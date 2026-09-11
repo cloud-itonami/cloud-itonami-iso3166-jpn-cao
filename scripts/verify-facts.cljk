@@ -1,6 +1,6 @@
 ;; Re-fetch every entry in facts.edn from the live authority.
 ;;
-;;   nbb --classpath scripts scripts/verify-facts.cljk [facts.edn]
+;;   kbb --backend sci --classpath scripts scripts/verify-facts.cljk [facts.edn]
 ;;
 ;; -- THREE EXIT CODES, ON PURPOSE
 ;;
@@ -76,10 +76,10 @@
 
 ;; -- host-probe, INLINED ----------------------------------------------------
 ;; The measuring instruments were a sibling namespace (scripts/host_probe.cljk).
-;; The fleet gate runs `nbb scripts/verify-facts.cljk` with no --classpath, so a
+;; The fleet gate runs `kbb --backend sci scripts/verify-facts.cljk` with no --classpath, so a
 ;; cross-file namespace require cannot resolve when THIS script is the entry
 ;; point. The functions are inlined here verbatim so the gate's invocation runs
-;; the SAME checks cao's own invocation (nbb --classpath scripts ...) runs.
+;; the SAME checks cao's own invocation (kbb --backend sci --classpath scripts ...) runs.
 ;; scripts/host_probe.cljk remains the source for scripts/measure-host.cljk;
 ;; the inlined copies below must stay byte-identical to it.
 
