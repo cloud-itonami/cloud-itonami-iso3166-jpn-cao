@@ -1,6 +1,6 @@
 ;; Re-fetch every entry in facts.edn from the live authority.
 ;;
-;;   nbb --classpath scripts scripts/verify-facts.cljs [facts.edn]
+;;   nbb --classpath scripts scripts/verify-facts.cljk [facts.edn]
 ;;
 ;; -- THREE EXIT CODES, ON PURPOSE
 ;;
@@ -75,12 +75,12 @@
             [clojure.string :as str]))
 
 ;; -- host-probe, INLINED ----------------------------------------------------
-;; The measuring instruments were a sibling namespace (scripts/host_probe.cljs).
-;; The fleet gate runs `nbb scripts/verify-facts.cljs` with no --classpath, so a
+;; The measuring instruments were a sibling namespace (scripts/host_probe.cljk).
+;; The fleet gate runs `nbb scripts/verify-facts.cljk` with no --classpath, so a
 ;; cross-file namespace require cannot resolve when THIS script is the entry
 ;; point. The functions are inlined here verbatim so the gate's invocation runs
 ;; the SAME checks cao's own invocation (nbb --classpath scripts ...) runs.
-;; scripts/host_probe.cljs remains the source for scripts/measure-host.cljs;
+;; scripts/host_probe.cljk remains the source for scripts/measure-host.cljk;
 ;; the inlined copies below must stay byte-identical to it.
 
 (def ua "cloud-itonami-iso3166-jpn-cao facts verifier")
