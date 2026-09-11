@@ -69,14 +69,14 @@ It is tx-data, so it loads like every other EDN corpus in this workspace:
 Every entry is re-fetched from the live authority by:
 
 ```bash
-nbb --classpath scripts scripts/verify-facts.cljk     # 0 ok / 1 wrong / 2 REFUSED
-nbb --classpath scripts scripts/break-tests.cljk      # does that script actually go red?
-nbb --classpath scripts scripts/measure-host.cljk     # regenerate the header's numbers
-nbb scripts/mutation-check.cljk                       # the fleet gate's in-repo suite (tally)
+kbb --backend sci --classpath scripts scripts/verify-facts.cljk     # 0 ok / 1 wrong / 2 REFUSED
+kbb --backend sci --classpath scripts scripts/break-tests.cljk      # does that script actually go red?
+kbb --backend sci --classpath scripts scripts/measure-host.cljk     # regenerate the header's numbers
+kbb --backend sci scripts/mutation-check.cljk                       # the fleet gate's in-repo suite (tally)
 ```
 
 The fleet gate (`scripts/itonami-verify-proposal.cljs`) needs the verifier to run
-under **its** bare invocation (`nbb scripts/verify-facts.cljk`), so the measuring
+under **its** bare invocation (`kbb --backend sci scripts/verify-facts.cljk`), so the measuring
 functions that were a sibling namespace (`scripts/host_probe.cljk`) are inlined
 into `scripts/verify-facts.cljk` as well. Run it WITH or WITHOUT `--classpath scripts` --
 the checks are identical either way. `scripts/mutation-check.cljk` restates cao's
