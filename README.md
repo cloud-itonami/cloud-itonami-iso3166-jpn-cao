@@ -69,17 +69,17 @@ It is tx-data, so it loads like every other EDN corpus in this workspace:
 Every entry is re-fetched from the live authority by:
 
 ```bash
-nbb --classpath scripts scripts/verify-facts.cljs     # 0 ok / 1 wrong / 2 REFUSED
-nbb --classpath scripts scripts/break-tests.cljs      # does that script actually go red?
-nbb --classpath scripts scripts/measure-host.cljs     # regenerate the header's numbers
-nbb scripts/mutation-check.cljs                       # the fleet gate's in-repo suite (tally)
+nbb --classpath scripts scripts/verify-facts.cljk     # 0 ok / 1 wrong / 2 REFUSED
+nbb --classpath scripts scripts/break-tests.cljk      # does that script actually go red?
+nbb --classpath scripts scripts/measure-host.cljk     # regenerate the header's numbers
+nbb scripts/mutation-check.cljk                       # the fleet gate's in-repo suite (tally)
 ```
 
 The fleet gate (`scripts/itonami-verify-proposal.cljs`) needs the verifier to run
-under **its** bare invocation (`nbb scripts/verify-facts.cljs`), so the measuring
-functions that were a sibling namespace (`scripts/host_probe.cljs`) are inlined
-into `scripts/verify-facts.cljs` as well. Run it WITH or WITHOUT `--classpath scripts` --
-the checks are identical either way. `scripts/mutation-check.cljs` restates cao's
+under **its** bare invocation (`nbb scripts/verify-facts.cljk`), so the measuring
+functions that were a sibling namespace (`scripts/host_probe.cljk`) are inlined
+into `scripts/verify-facts.cljk` as well. Run it WITH or WITHOUT `--classpath scripts` --
+the checks are identical either way. `scripts/mutation-check.cljk` restates cao's
 own `break-tests.cljs` cases in the gate's `caught=/not-caught=` tally so the gate
 can read cao's discrimination before it will land a proposal against this repository.
 
@@ -142,7 +142,7 @@ fail. Two of them are near misses rather than distant ones:
 
 ### One measuring instrument, and why
 
-Every character count above comes from `scripts/host_probe.cljs`, and the
+Every character count above comes from `scripts/host_probe.cljk`, and the
 verifier subtracts needles with the same `de-tag`. The first pass of this file
 used one ported unchanged from a sibling register, and it silently failed to
 strip `<style>` and `<script>` contents: in ClojureScript,

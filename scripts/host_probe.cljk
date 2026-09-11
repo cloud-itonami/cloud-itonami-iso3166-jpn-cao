@@ -6,7 +6,7 @@
 ;; own evidence -- and the disagreement would be invisible, because both would
 ;; look internally consistent.
 ;;
-;; So there is one de-tag, here, and scripts/measure-host.cljs regenerates
+;; So there is one de-tag, here, and scripts/measure-host.cljk regenerates
 ;; every number the register's header states by calling it. If you change
 ;; de-tag, the header's numbers change with it -- rerun measure-host and
 ;; update them.

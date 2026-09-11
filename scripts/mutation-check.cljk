@@ -6,7 +6,7 @@
 ;; knows cao's verifier still discriminates before it will accept a proposal
 ;; against this repository.
 ;;
-;;   nbb scripts/mutation-check.cljs
+;;   nbb scripts/mutation-check.cljk
 ;;
 ;; WHY THE REASON AND NOT THE COLOUR.
 ;; A negative test that asserts only "the run went red" counts a run that went
@@ -15,7 +15,7 @@
 ;; goes red the wrong way is a MISMATCH, not a catch.
 ;;
 ;; THE CASES ARE CAO'S OWN.
-;; cao has long carried this suite as scripts/break-tests.cljs -- the same
+;; cao has long carried this suite as scripts/break-tests.cljk -- the same
 ;; mutations, the same anchors, the same asserted reasons and exit codes. This
 ;; file restates those cases in the gate's accounting format so the fleet gate
 ;; can read cao's discrimination; it does not add, remove or relax a check.
@@ -40,7 +40,7 @@
 
 (def base-text (fs/readFileSync "facts.edn" "utf8"))
 
-(def verifier-path "scripts/verify-facts.cljs")
+(def verifier-path "scripts/verify-facts.cljk")
 
 (defn- tmpfile [n] (path/join (os/tmpdir) (str "cao-mutation-" n ".edn")))
 
